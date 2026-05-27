@@ -43,6 +43,7 @@ export default function Home() {
   const [searched, setSearched] = useState(false)
   const [currentQuery, setCurrentQuery] = useState('')
   const [paperError, setPaperError] = useState<string | null>(null)
+  const [bookError, setBookError] = useState<string | null>(null)
 
   // Read key from localStorage on mount (localStorage not available on server)
   useEffect(() => {
@@ -60,6 +61,7 @@ export default function Home() {
     setPapers([])
     setBooks([])
     setKeywords([])
+    setBookError(null)
 
     const headers: HeadersInit = apiKey ? { 'x-serpapi-key': apiKey } : {}
 
@@ -74,13 +76,14 @@ export default function Home() {
       .catch((err) => setPaperError(err.message || 'Failed to load papers'))
       .finally(() => setLoadingPapers(false))
 
-    // Books — fail silently so papers still show
+    // Books
     fetch(`/api/books?q=${encodeURIComponent(query)}`)
       .then((r) => r.json())
       .then((data) => {
+        if (data.error) throw new Error(data.error)
         setBooks(data.books || [])
       })
-      .catch(() => {})
+      .catch((err) => setBookError(err.message || 'Failed to load books'))
       .finally(() => setLoadingBooks(false))
   }
 
@@ -203,6 +206,10 @@ export default function Home() {
 
                 {loadingBooks ? (
                   Array.from({ length: 6 }).map((_, i) => <BookSkeleton key={i} />)
+                ) : bookError ? (
+                  <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                    ⚠️ {bookError}
+                  </div>
                 ) : books.length > 0 ? (
                   books.map((book) => <BookCard key={book.id} book={book} />)
                 ) : (
