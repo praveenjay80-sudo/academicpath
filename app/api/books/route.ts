@@ -44,10 +44,14 @@ export async function GET(request: NextRequest) {
   const cleanedQuery = cleanQueryForBooks(query)
 
   try {
-    // Plain fetch — no Next.js caching options (causes issues in route handlers)
     const olRes = await fetch(
       `https://openlibrary.org/search.json?q=${encodeURIComponent(cleanedQuery)}&limit=15&fields=key,title,author_name,first_publish_year,edition_count,isbn,cover_i&type=work`,
-      { signal: AbortSignal.timeout(10000) }
+      {
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          'User-Agent': 'AcademicPath/1.0 (https://github.com/academicpath; praveen.jay80@gmail.com)',
+        },
+      }
     )
 
     if (!olRes.ok) {
