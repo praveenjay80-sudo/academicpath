@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import SearchBar from '@/components/SearchBar'
 import PaperCard from '@/components/PaperCard'
 import BookCard from '@/components/BookCard'
 import KeywordChips from '@/components/KeywordChips'
+import ApiKeySetup from '@/components/ApiKeySetup'
 import { Paper, Book } from '@/lib/types'
 
 function PaperSkeleton() {
@@ -32,6 +33,8 @@ function BookSkeleton() {
 }
 
 export default function Home() {
+  const [apiKey, setApiKey] = useState<string | null>(null)
+  const [keyChecked, setKeyChecked] = useState(false)
   const [papers, setPapers] = useState<Paper[]>([])
   const [books, setBooks] = useState<Book[]>([])
   const [keywords, setKeywords] = useState<string[]>([])
@@ -40,6 +43,13 @@ export default function Home() {
   const [searched, setSearched] = useState(false)
   const [currentQuery, setCurrentQuery] = useState('')
   const [paperError, setPaperError] = useState<string | null>(null)
+
+  // Read key from localStorage on mount (localStorage not available on server)
+  useEffect(() => {
+    const stored = localStorage.getItem('serpapi_key')
+    setApiKey(stored)
+    setKeyChecked(true)
+  }, [])
 
   const handleSearch = async (query: string) => {
     setCurrentQuery(query)
@@ -51,8 +61,10 @@ export default function Home() {
     setBooks([])
     setKeywords([])
 
+    const headers: HeadersInit = apiKey ? { 'x-serpapi-key': apiKey } : {}
+
     // Papers + keywords
-    fetch(`/api/papers?q=${encodeURIComponent(query)}`)
+    fetch(`/api/papers?q=${encodeURIComponent(query)}`, { headers })
       .then((r) => r.json())
       .then((data) => {
         if (data.error) throw new Error(data.error)
@@ -72,17 +84,43 @@ export default function Home() {
       .finally(() => setLoadingBooks(false))
   }
 
+  const handleClearKey = () => {
+    localStorage.removeItem('serpapi_key')
+    setApiKey(null)
+    setPapers([])
+    setBooks([])
+    setKeywords([])
+    setSearched(false)
+  }
+
   const loading = loadingPapers || loadingBooks
+
+  // Wait for localStorage check to avoid flash
+  if (!keyChecked) return null
+
+  // No key yet — show setup screen
+  if (!apiKey) {
+    return <ApiKeySetup onSave={(key) => setApiKey(key)} />
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-900 leading-none">🎓 AcademicPath</h1>
             <p className="text-xs text-gray-400 mt-0.5">Master any topic — zero to expert</p>
           </div>
+          {/* Settings — clear/update API key */}
+          <button
+            onClick={handleClearKey}
+            title="Change SerpAPI key"
+            className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
+          >
+            <span>⚙️</span>
+            <span className="hidden sm:inline">Change API key</span>
+          </button>
         </div>
       </header>
 

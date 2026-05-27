@@ -46,9 +46,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Query is required' }, { status: 400 })
   }
 
-  const apiKey = process.env.SERPAPI_KEY
+  // Accept key from browser (localStorage) or fall back to server env var
+  const apiKey = request.headers.get('x-serpapi-key') || process.env.SERPAPI_KEY
   if (!apiKey) {
-    return NextResponse.json({ error: 'SERPAPI_KEY is not configured' }, { status: 500 })
+    return NextResponse.json({ error: 'No SerpAPI key provided' }, { status: 401 })
   }
 
   try {

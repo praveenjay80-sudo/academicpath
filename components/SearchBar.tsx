@@ -26,6 +26,7 @@ export default function SearchBar({ onSearch, loading, initialValue = '' }: Prop
         placeholder='Try "machine learning" or "papers on attention mechanisms in NLP"'
         className="flex-1 px-4 py-3 border border-gray-300 rounded-xl text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white shadow-sm"
         disabled={loading}
+        suppressHydrationWarning
       />
       <button
         type="submit"
