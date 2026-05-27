@@ -40,3 +40,22 @@ export interface ArchiveBook {
   downloads: number
   link: string
 }
+
+export interface OpenAlexConcept {
+  id: string           // e.g. "C119857082"
+  display_name: string
+  level: number        // 0 = top-level field, higher = more specific
+  works_count: number
+  description: string
+  link: string         // https://openalex.org/C...
+}
+
+export interface OpenAlexTopic {
+  id: string           // e.g. "T12072"
+  display_name: string
+  works_count: number
+  domain: string       // e.g. "Physical Sciences"
+  field: string        // e.g. "Physics and Astronomy"
+  subfield: string     // e.g. "Quantum Physics"
+  link: string         // https://openalex.org/T...
+}

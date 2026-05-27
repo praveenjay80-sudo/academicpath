@@ -65,9 +65,10 @@ export async function GET(request: NextRequest) {
   const apiKey = request.headers.get('x-serpapi-key') || process.env.SERPAPI_KEY
 
   // ── CrossRef (papers sorted by citation count server-side) ───────────────
-  // No API key required. "Polite pool" = faster limits with mailto param.
+  // query.title = title-field search only → field-specific results (no economics
+  // papers appearing for "quantum mechanics" just because "mechanics" is in them)
   const crUrl = new URL('https://api.crossref.org/works')
-  crUrl.searchParams.set('query', query)
+  crUrl.searchParams.set('query.title', query)
   crUrl.searchParams.set('sort', 'is-referenced-by-count')
   crUrl.searchParams.set('order', 'desc')
   crUrl.searchParams.set('rows', '30')

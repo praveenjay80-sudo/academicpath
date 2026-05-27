@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react'
 import SearchBar from '@/components/SearchBar'
 import PaperCard from '@/components/PaperCard'
 import BookCard from '@/components/BookCard'
+import TopicCard from '@/components/TopicCard'
+import ConceptCard from '@/components/ConceptCard'
 import KeywordChips from '@/components/KeywordChips'
 import ApiKeySetup from '@/components/ApiKeySetup'
-import { Paper, Book } from '@/lib/types'
+import { Paper, Book, OpenAlexTopic, OpenAlexConcept } from '@/lib/types'
 
 function PaperSkeleton() {
   return (
@@ -28,6 +30,16 @@ function BookSkeleton() {
         <div className="h-3 w-2/3 bg-gray-200 rounded mb-3" />
         <div className="h-3 w-40 bg-gray-200 rounded" />
       </div>
+    </div>
+  )
+}
+
+function SimpleSkeleton() {
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 animate-pulse">
+      <div className="h-4 w-full bg-gray-200 rounded mb-2" />
+      <div className="h-3 w-2/3 bg-gray-200 rounded mb-2" />
+      <div className="h-3 w-24 bg-gray-200 rounded" />
     </div>
   )
 }
@@ -71,15 +83,19 @@ export default function Home() {
   // Data
   const [papers, setPapers] = useState<Paper[]>([])
   const [olBooks, setOlBooks] = useState<Book[]>([])
+  const [topics, setTopics] = useState<OpenAlexTopic[]>([])
+  const [concepts, setConcepts] = useState<OpenAlexConcept[]>([])
   const [keywords, setKeywords] = useState<string[]>([])
 
   // Loading
   const [loadingPapers, setLoadingPapers] = useState(false)
   const [loadingOL, setLoadingOL] = useState(false)
+  const [loadingOA, setLoadingOA] = useState(false)
 
   // Errors
   const [papersError, setPapersError] = useState<string | null>(null)
   const [olError, setOlError] = useState<string | null>(null)
+  const [oaError, setOaError] = useState<string | null>(null)
 
   const [searched, setSearched] = useState(false)
   const [currentQuery, setCurrentQuery] = useState('')
@@ -95,15 +111,19 @@ export default function Home() {
     setSearched(true)
     setPapersError(null)
     setOlError(null)
+    setOaError(null)
     setLoadingPapers(true)
     setLoadingOL(true)
+    setLoadingOA(true)
     setPapers([])
     setOlBooks([])
+    setTopics([])
+    setConcepts([])
     setKeywords([])
 
     const headers: HeadersInit = apiKey ? { 'x-serpapi-key': apiKey } : {}
 
-    // ① Semantic Scholar → papers + SerpAPI → keywords (one call)
+    // ① CrossRef → papers + SerpAPI → keywords
     fetch(`/api/papers?q=${encodeURIComponent(query)}`, { headers })
       .then((r) => r.json())
       .then((data) => {
@@ -123,6 +143,17 @@ export default function Home() {
       })
       .catch((err) => setOlError(err.message || 'Failed to load books'))
       .finally(() => setLoadingOL(false))
+
+    // ③ OpenAlex → concepts + topics
+    fetch(`/api/openalex?q=${encodeURIComponent(query)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) throw new Error(data.error)
+        setTopics(data.topics || [])
+        setConcepts(data.concepts || [])
+      })
+      .catch((err) => setOaError(err.message || 'Failed to load concepts'))
+      .finally(() => setLoadingOA(false))
   }
 
   const handleClearKey = () => {
@@ -131,7 +162,7 @@ export default function Home() {
     setSearched(false)
   }
 
-  const loading = loadingPapers || loadingOL
+  const loading = loadingPapers || loadingOL || loadingOA
 
   if (!keyChecked) return null
   if (!apiKey) return <ApiKeySetup onSave={(key) => setApiKey(key)} />
@@ -140,7 +171,7 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-screen-xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-screen-2xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-900 leading-none">🎓 AcademicPath</h1>
             <p className="text-xs text-gray-400 mt-0.5">Master any topic — zero to expert</p>
@@ -155,7 +186,7 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="max-w-screen-xl mx-auto px-6 py-8">
+      <main className="max-w-screen-2xl mx-auto px-6 py-8">
         {/* Search */}
         <div className="mb-6">
           <SearchBar onSearch={handleSearch} loading={loading} />
@@ -169,10 +200,9 @@ export default function Home() {
               Find the most influential work on any topic
             </p>
             <p className="text-sm text-gray-400 max-w-md mx-auto">
-              Try <span className="italic text-gray-500">&quot;machine learning&quot;</span> or{' '}
-              <span className="italic text-gray-500">
-                &quot;attention mechanisms in NLP&quot;
-              </span>
+              Try <span className="italic text-gray-500">&quot;machine learning&quot;</span>,{' '}
+              <span className="italic text-gray-500">&quot;quantum mechanics&quot;</span> or{' '}
+              <span className="italic text-gray-500">&quot;attention mechanisms in NLP&quot;</span>
             </p>
           </div>
         )}
@@ -186,15 +216,15 @@ export default function Home() {
 
             <KeywordChips keywords={keywords} onSearch={handleSearch} />
 
-            {/* 2-column grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            {/* 4-column grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 items-start">
 
               {/* ── Col 1: Papers ── */}
               <div>
                 <ColHeader
                   emoji="📄"
                   title="Papers"
-                  subtitle="Semantic Scholar · by citation count"
+                  subtitle="CrossRef · by citation count"
                   count={papers.length}
                   loading={loadingPapers}
                 />
@@ -209,12 +239,12 @@ export default function Home() {
                 )}
               </div>
 
-              {/* ── Col 2: Open Library ── */}
+              {/* ── Col 2: Open Library Books ── */}
               <div>
                 <ColHeader
                   emoji="📚"
                   title="Books"
-                  subtitle="Open Library · by editions & library holdings"
+                  subtitle="Open Library · by library holdings"
                   count={olBooks.length}
                   loading={loadingOL}
                 />
@@ -226,6 +256,46 @@ export default function Home() {
                   olBooks.map((b) => <BookCard key={b.id} book={b} />)
                 ) : (
                   <Empty text="No books found" />
+                )}
+              </div>
+
+              {/* ── Col 3: OpenAlex Topics ── */}
+              <div>
+                <ColHeader
+                  emoji="🔬"
+                  title="Topics"
+                  subtitle="OpenAlex · research topic clusters"
+                  count={topics.length}
+                  loading={loadingOA}
+                />
+                {loadingOA ? (
+                  Array.from({ length: 5 }).map((_, i) => <SimpleSkeleton key={i} />)
+                ) : oaError ? (
+                  <ErrorBox message={oaError} />
+                ) : topics.length > 0 ? (
+                  topics.map((t) => <TopicCard key={t.id} topic={t} />)
+                ) : (
+                  <Empty text="No topics found" />
+                )}
+              </div>
+
+              {/* ── Col 4: OpenAlex Concepts ── */}
+              <div>
+                <ColHeader
+                  emoji="🧠"
+                  title="Concepts"
+                  subtitle="OpenAlex · academic concept map"
+                  count={concepts.length}
+                  loading={loadingOA}
+                />
+                {loadingOA ? (
+                  Array.from({ length: 5 }).map((_, i) => <SimpleSkeleton key={i} />)
+                ) : oaError ? (
+                  <ErrorBox message={oaError} />
+                ) : concepts.length > 0 ? (
+                  concepts.map((c) => <ConceptCard key={c.id} concept={c} />)
+                ) : (
+                  <Empty text="No concepts found" />
                 )}
               </div>
 
