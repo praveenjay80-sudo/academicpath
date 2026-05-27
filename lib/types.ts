@@ -21,3 +21,22 @@ export interface Book {
   coverUrl?: string
   openLibraryLink: string
 }
+
+export interface ScholarBook {
+  id: string
+  title: string
+  authors: string
+  year: number
+  citations: number
+  link: string
+  pdfLink?: string
+}
+
+export interface ArchiveBook {
+  id: string
+  title: string
+  creator: string
+  year: string
+  downloads: number
+  link: string
+}
