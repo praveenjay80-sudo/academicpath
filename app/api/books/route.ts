@@ -24,7 +24,12 @@ async function getWorldCatHoldings(isbn: string): Promise<number> {
   try {
     const res = await fetch(
       `https://classify.oclc.org/classify2/Classify?isbn=${encodeURIComponent(isbn)}&summary=true`,
-      { signal: AbortSignal.timeout(5000) } // 5s timeout per WorldCat call
+      {
+        signal: AbortSignal.timeout(5000),
+        headers: {
+          'User-Agent': 'AcademicPath/1.0 (https://github.com/academicpath; praveen.jay80@gmail.com)',
+        },
+      }
     )
     if (!res.ok) return 0
     const xml = await res.text()
