@@ -13,8 +13,28 @@ const SURVEY_WORDS = [
   'tutorial', 'handbook', 'guide', 'fundamentals', 'principles',
 ]
 
-// Types that are books, not papers — exclude from papers column
-const BOOK_TYPES = new Set(['Book', 'BookSection', 'EditedBook'])
+// CrossRef types to exclude (books, chapters, datasets, reports)
+const EXCLUDED_TYPES = new Set([
+  'book', 'edited-book', 'book-chapter', 'book-section',
+  'book-series', 'reference-book', 'reference-entry',
+  'monograph', 'report', 'dataset', 'component',
+])
+
+type CrossRefAuthor = {
+  given?: string
+  family?: string
+  name?: string
+}
+
+type CrossRefItem = {
+  DOI?: string
+  title?: string[]
+  author?: CrossRefAuthor[]
+  published?: { 'date-parts'?: number[][] }
+  'is-referenced-by-count'?: number
+  URL?: string
+  type?: string
+}
 
 function getTag(title: string, year: number, citations: number): PaperTag {
   const lower = title.toLowerCase()
@@ -24,10 +44,18 @@ function getTag(title: string, year: number, citations: number): PaperTag {
   return 'INFLUENTIAL'
 }
 
-function formatAuthors(authors: Array<{ name: string }>): string {
+function formatAuthors(authors: CrossRefAuthor[] | undefined): string {
   if (!authors || authors.length === 0) return 'Unknown'
-  const names = authors.slice(0, 3).map((a) => a.name)
+  const names = authors.slice(0, 3).map((a) =>
+    a.family
+      ? a.given ? `${a.given} ${a.family}` : a.family
+      : a.name || 'Unknown'
+  )
   return names.join(', ') + (authors.length > 3 ? ' et al.' : '')
+}
+
+function extractYear(published: CrossRefItem['published']): number {
+  return published?.['date-parts']?.[0]?.[0] ?? 0
 }
 
 export async function GET(request: NextRequest) {
@@ -36,15 +64,15 @@ export async function GET(request: NextRequest) {
 
   const apiKey = request.headers.get('x-serpapi-key') || process.env.SERPAPI_KEY
 
-  // ── Semantic Scholar (papers, sorted by citation count) ──────────────────
-  const ssUrl = new URL('https://api.semanticscholar.org/graph/v1/paper/search')
-  ssUrl.searchParams.set('query', query)
-  ssUrl.searchParams.set(
-    'fields',
-    'paperId,title,authors,year,citationCount,openAccessPdf,publicationTypes,externalIds'
-  )
-  ssUrl.searchParams.set('limit', '100') // fetch large pool, then sort by citations
-  ssUrl.searchParams.set('offset', '0')
+  // ── CrossRef (papers sorted by citation count server-side) ───────────────
+  // No API key required. "Polite pool" = faster limits with mailto param.
+  const crUrl = new URL('https://api.crossref.org/works')
+  crUrl.searchParams.set('query', query)
+  crUrl.searchParams.set('sort', 'is-referenced-by-count')
+  crUrl.searchParams.set('order', 'desc')
+  crUrl.searchParams.set('rows', '30')
+  crUrl.searchParams.set('select', 'DOI,title,author,published,is-referenced-by-count,URL,type')
+  crUrl.searchParams.set('mailto', 'praveen.jay80@gmail.com')
 
   // ── SerpAPI (only for related keyword chips) ─────────────────────────────
   const serpUrl = new URL('https://serpapi.com/search')
@@ -56,8 +84,8 @@ export async function GET(request: NextRequest) {
   }
 
   // Run both in parallel
-  const [ssResult, serpResult] = await Promise.allSettled([
-    fetch(ssUrl.toString(), {
+  const [crResult, serpResult] = await Promise.allSettled([
+    fetch(crUrl.toString(), {
       signal: AbortSignal.timeout(12000),
       headers: { 'User-Agent': 'AcademicPath/1.0 (praveen.jay80@gmail.com)' },
     }),
@@ -66,62 +94,70 @@ export async function GET(request: NextRequest) {
       : Promise.reject('no key'),
   ])
 
-  // ── Parse Semantic Scholar papers ────────────────────────────────────────
-  if (ssResult.status === 'rejected') {
-    return NextResponse.json({ error: 'Semantic Scholar unavailable' }, { status: 502 })
+  // ── Parse CrossRef papers ─────────────────────────────────────────────────
+  if (crResult.status === 'rejected') {
+    console.error('CrossRef fetch rejected:', crResult.reason)
+    return NextResponse.json({ error: 'Papers API unavailable' }, { status: 502 })
   }
 
-  const ssData = await ssResult.value.json()
-
-  if (ssData.error) {
-    return NextResponse.json({ error: ssData.error }, { status: 400 })
+  const crResponse = crResult.value
+  if (!crResponse.ok) {
+    const errText = await crResponse.text().catch(() => '')
+    console.error('CrossRef HTTP error:', crResponse.status, errText)
+    return NextResponse.json(
+      { error: `Papers API error (${crResponse.status})` },
+      { status: 502 }
+    )
   }
 
-  type SSPaper = {
-    paperId: string
-    title: string
-    authors: Array<{ name: string }>
-    year: number
-    citationCount: number
-    openAccessPdf?: { url: string }
-    publicationTypes?: string[]
+  let crData: { message: { items: CrossRefItem[] } }
+  try {
+    crData = await crResponse.json()
+  } catch (e) {
+    console.error('CrossRef JSON parse error:', e)
+    return NextResponse.json({ error: 'Failed to parse papers response' }, { status: 502 })
   }
 
-  const allItems: SSPaper[] = ssData.data || []
+  const allItems: CrossRefItem[] = crData?.message?.items || []
 
   const papers: Paper[] = allItems
-    // Remove books — those go in the books column
-    .filter((item) => {
-      const types = item.publicationTypes || []
-      return !types.some((t) => BOOK_TYPES.has(t))
-    })
-    // Sort by citation count descending — this is the key fix
-    .sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0))
+    // Exclude books, datasets, reports — papers only
+    .filter((item) => !EXCLUDED_TYPES.has(item.type ?? ''))
+    // Must have a title and DOI
+    .filter((item) => !!(item.title?.[0]) && !!(item.DOI))
     .slice(0, 20)
-    .map((item) => ({
-      id: item.paperId,
-      title: item.title || 'Untitled',
-      authors: formatAuthors(item.authors),
-      year: item.year || 0,
-      citations: item.citationCount || 0,
-      link: `https://www.semanticscholar.org/paper/${item.paperId}`,
-      pdfLink: item.openAccessPdf?.url,
-      tag: getTag(item.title || '', item.year || 0, item.citationCount || 0),
-    }))
+    .map((item) => {
+      const title = item.title![0]
+      const year = extractYear(item.published)
+      const citations = item['is-referenced-by-count'] ?? 0
+      return {
+        id: item.DOI!,
+        title,
+        authors: formatAuthors(item.author),
+        year,
+        citations,
+        link: item.URL || `https://doi.org/${item.DOI}`,
+        tag: getTag(title, year, citations),
+      }
+    })
 
-  // Re-sort by tag group then citations within group
+  // Re-sort by tag group, then citations within group
   papers.sort((a, b) => {
     const tagDiff = TAG_ORDER[a.tag] - TAG_ORDER[b.tag]
     return tagDiff !== 0 ? tagDiff : b.citations - a.citations
   })
 
-  // ── Parse SerpAPI keywords ───────────────────────────────────────────────
+  // ── Parse SerpAPI keywords ────────────────────────────────────────────────
   let keywords: string[] = []
   if (serpResult.status === 'fulfilled') {
-    const serpData = await serpResult.value.json()
-    keywords = (serpData.related_searches || [])
-      .map((s: { query: string }) => s.query)
-      .filter(Boolean)
+    try {
+      const serpData = await serpResult.value.json()
+      keywords = (serpData.related_searches || [])
+        .map((s: { query: string }) => s.query)
+        .filter(Boolean)
+    } catch {
+      // keywords stay empty — not critical
+    }
   }
 
   return NextResponse.json({ papers, keywords })
