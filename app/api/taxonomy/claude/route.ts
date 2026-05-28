@@ -22,9 +22,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'level must be ≥ 2' }, { status: 400 })
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = request.headers.get('x-anthropic-key') || process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
-    return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500 })
+    return NextResponse.json({ error: 'Anthropic API key not configured' }, { status: 500 })
   }
 
   const client = new Anthropic({ apiKey })

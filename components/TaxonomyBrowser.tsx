@@ -15,11 +15,13 @@ interface Column {
 
 interface Props {
   onSearch: (query: string) => void
+  anthropicKey: string
 }
 
-export default function TaxonomyBrowser({ onSearch }: Props) {
+export default function TaxonomyBrowser({ onSearch, anthropicKey }: Props) {
   const [open, setOpen] = useState(false)
   const [columns, setColumns] = useState<Column[]>([])
+  const [claudeError, setClaudeError] = useState<string | null>(null)
 
   // Load L0 the first time the panel is opened
   useEffect(() => {
@@ -63,6 +65,8 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
 
     if (nextLevel > MAX_DEPTH) return
 
+    setClaudeError(null)
+
     // L0→L1: OpenAlex (reliable at this depth)
     // L1→L2, L2→L3: Claude (OpenAlex hierarchy is noisy past L1)
     const fetcher: Promise<TaxonomyNode[]> =
@@ -76,15 +80,19 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
                 parentName: node.display_name,
                 context: breadcrumb,
                 level: String(nextLevel),
-              })
+              }),
+            { headers: { 'x-anthropic-key': anthropicKey } }
           )
-            .then((r) => r.json())
-            .then((d) => d.nodes || [])
+            .then(async (r) => {
+              const d = await r.json()
+              if (d.error) throw new Error(d.error)
+              return d.nodes || []
+            })
 
     fetcher
       .then((children) => {
         setColumns((prev) => {
-          if (prev[colIdx]?.selectedId !== nodeId) return prev  // stale, user changed selection
+          if (prev[colIdx]?.selectedId !== nodeId) return prev
           if (children.length === 0) return prev.slice(0, colIdx + 1)
           return [
             ...prev.slice(0, colIdx + 1),
@@ -92,7 +100,10 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
           ]
         })
       })
-      .catch(() => setColumns((prev) => prev.slice(0, colIdx + 1)))
+      .catch((err: Error) => {
+        setClaudeError(err.message || 'Failed to load subfields')
+        setColumns((prev) => prev.slice(0, colIdx + 1))
+      })
   }
 
   const breadcrumb = columns
@@ -122,7 +133,7 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
           </span>
         </div>
         <button
-          onClick={() => { setOpen(false); setColumns([]) }}
+          onClick={() => { setOpen(false); setColumns([]); setClaudeError(null) }}
           className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
         >
           ✕ Close
@@ -172,6 +183,12 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
       {columns[0] && !columns[0].loading && columns[0].nodes.length === 0 && (
         <p className="text-xs text-red-400 mt-2">
           Could not load fields — check your connection.
+        </p>
+      )}
+
+      {claudeError && (
+        <p className="text-xs text-red-500 mt-2 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5">
+          ⚠️ {claudeError}
         </p>
       )}
     </div>

@@ -79,6 +79,7 @@ function Empty({ text }: { text: string }) {
 
 export default function Home() {
   const [apiKey, setApiKey] = useState<string | null>(null)
+  const [anthropicKey, setAnthropicKey] = useState<string | null>(null)
   const [keyChecked, setKeyChecked] = useState(false)
 
   // Data
@@ -102,8 +103,8 @@ export default function Home() {
   const [currentQuery, setCurrentQuery] = useState('')
 
   useEffect(() => {
-    const stored = localStorage.getItem('serpapi_key')
-    setApiKey(stored)
+    setApiKey(localStorage.getItem('serpapi_key'))
+    setAnthropicKey(localStorage.getItem('anthropic_key'))
     setKeyChecked(true)
   }, [])
 
@@ -159,14 +160,22 @@ export default function Home() {
 
   const handleClearKey = () => {
     localStorage.removeItem('serpapi_key')
+    localStorage.removeItem('anthropic_key')
     setApiKey(null)
+    setAnthropicKey(null)
     setSearched(false)
   }
 
   const loading = loadingPapers || loadingOL || loadingOA
 
   if (!keyChecked) return null
-  if (!apiKey) return <ApiKeySetup onSave={(key) => setApiKey(key)} />
+  if (!apiKey || !anthropicKey) return (
+    <ApiKeySetup
+      onSave={(serp, anthropic) => { setApiKey(serp); setAnthropicKey(anthropic) }}
+      initialSerp={apiKey ?? ''}
+      initialAnthropic={anthropicKey ?? ''}
+    />
+  )
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -194,7 +203,7 @@ export default function Home() {
         </div>
 
         {/* Taxonomy browser */}
-        <TaxonomyBrowser onSearch={handleSearch} />
+        <TaxonomyBrowser onSearch={handleSearch} anthropicKey={anthropicKey ?? ''} />
 
         {/* Landing */}
         {!searched && (
