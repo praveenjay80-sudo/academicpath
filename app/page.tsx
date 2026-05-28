@@ -8,6 +8,7 @@ import TopicCard from '@/components/TopicCard'
 import ConceptCard from '@/components/ConceptCard'
 import KeywordChips from '@/components/KeywordChips'
 import ApiKeySetup from '@/components/ApiKeySetup'
+import TaxonomyBrowser from '@/components/TaxonomyBrowser'
 import { Paper, Book, OpenAlexTopic, OpenAlexConcept } from '@/lib/types'
 
 function PaperSkeleton() {
@@ -188,9 +189,12 @@ export default function Home() {
 
       <main className="max-w-screen-2xl mx-auto px-6 py-8">
         {/* Search */}
-        <div className="mb-6">
+        <div className="mb-4">
           <SearchBar onSearch={handleSearch} loading={loading} />
         </div>
+
+        {/* Taxonomy browser */}
+        <TaxonomyBrowser onSearch={handleSearch} />
 
         {/* Landing */}
         {!searched && (

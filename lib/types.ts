@@ -59,3 +59,11 @@ export interface OpenAlexTopic {
   subfield: string     // e.g. "Quantum Physics"
   link: string         // https://openalex.org/T...
 }
+
+export interface TaxonomyNode {
+  id: string           // e.g. "C127413603"
+  display_name: string
+  level: number        // 0 = Field, 1 = Domain, 2 = Area, 3 = Topic, 4+ = Specialty
+  works_count: number
+  description: string
+}
