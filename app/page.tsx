@@ -79,7 +79,6 @@ function Empty({ text }: { text: string }) {
 
 export default function Home() {
   const [apiKey, setApiKey] = useState<string | null>(null)
-  const [anthropicKey, setAnthropicKey] = useState('')
   const [keyChecked, setKeyChecked] = useState(false)
 
   // Data
@@ -104,7 +103,6 @@ export default function Home() {
 
   useEffect(() => {
     setApiKey(localStorage.getItem('serpapi_key'))
-    setAnthropicKey(localStorage.getItem('anthropic_key') ?? '')
     setKeyChecked(true)
   }, [])
 
@@ -160,9 +158,7 @@ export default function Home() {
 
   const handleClearKey = () => {
     localStorage.removeItem('serpapi_key')
-    localStorage.removeItem('anthropic_key')
     setApiKey(null)
-    setAnthropicKey('')
     setSearched(false)
   }
 
@@ -197,14 +193,7 @@ export default function Home() {
         </div>
 
         {/* Taxonomy browser */}
-        <TaxonomyBrowser
-          onSearch={handleSearch}
-          anthropicKey={anthropicKey}
-          onAnthropicKeySave={(key) => {
-            localStorage.setItem('anthropic_key', key)
-            setAnthropicKey(key)
-          }}
-        />
+        <TaxonomyBrowser onSearch={handleSearch} />
 
         {/* Landing */}
         {!searched && (
