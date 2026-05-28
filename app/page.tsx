@@ -79,7 +79,7 @@ function Empty({ text }: { text: string }) {
 
 export default function Home() {
   const [apiKey, setApiKey] = useState<string | null>(null)
-  const [anthropicKey, setAnthropicKey] = useState<string | null>(null)
+  const [anthropicKey, setAnthropicKey] = useState('')
   const [keyChecked, setKeyChecked] = useState(false)
 
   // Data
@@ -104,7 +104,7 @@ export default function Home() {
 
   useEffect(() => {
     setApiKey(localStorage.getItem('serpapi_key'))
-    setAnthropicKey(localStorage.getItem('anthropic_key'))
+    setAnthropicKey(localStorage.getItem('anthropic_key') ?? '')
     setKeyChecked(true)
   }, [])
 
@@ -162,20 +162,14 @@ export default function Home() {
     localStorage.removeItem('serpapi_key')
     localStorage.removeItem('anthropic_key')
     setApiKey(null)
-    setAnthropicKey(null)
+    setAnthropicKey('')
     setSearched(false)
   }
 
   const loading = loadingPapers || loadingOL || loadingOA
 
   if (!keyChecked) return null
-  if (!apiKey || !anthropicKey) return (
-    <ApiKeySetup
-      onSave={(serp, anthropic) => { setApiKey(serp); setAnthropicKey(anthropic) }}
-      initialSerp={apiKey ?? ''}
-      initialAnthropic={anthropicKey ?? ''}
-    />
-  )
+  if (!apiKey) return <ApiKeySetup onSave={(key) => setApiKey(key)} />
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -203,7 +197,14 @@ export default function Home() {
         </div>
 
         {/* Taxonomy browser */}
-        <TaxonomyBrowser onSearch={handleSearch} anthropicKey={anthropicKey ?? ''} />
+        <TaxonomyBrowser
+          onSearch={handleSearch}
+          anthropicKey={anthropicKey}
+          onAnthropicKeySave={(key) => {
+            localStorage.setItem('anthropic_key', key)
+            setAnthropicKey(key)
+          }}
+        />
 
         {/* Landing */}
         {!searched && (

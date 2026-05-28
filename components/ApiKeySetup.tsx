@@ -3,45 +3,37 @@
 import { useState, FormEvent } from 'react'
 
 interface Props {
-  onSave: (serpKey: string, anthropicKey: string) => void
-  initialSerp?: string
-  initialAnthropic?: string
+  onSave: (key: string) => void
 }
 
-export default function ApiKeySetup({ onSave, initialSerp = '', initialAnthropic = '' }: Props) {
-  const [serp, setSerp] = useState(initialSerp)
-  const [anthropic, setAnthropic] = useState(initialAnthropic)
+export default function ApiKeySetup({ onSave }: Props) {
+  const [value, setValue] = useState('')
   const [error, setError] = useState('')
   const [testing, setTesting] = useState(false)
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    const serpTrimmed = serp.trim()
-    const anthropicTrimmed = anthropic.trim()
-    if (!serpTrimmed || !anthropicTrimmed) {
-      setError('Both keys are required.')
-      return
-    }
+    const trimmed = value.trim()
+    if (!trimmed) return
 
     setTesting(true)
     setError('')
 
     try {
       const res = await fetch(`/api/papers?q=test`, {
-        headers: { 'x-serpapi-key': serpTrimmed },
+        headers: { 'x-serpapi-key': trimmed },
       })
       const data = await res.json()
 
       if (data.error?.toLowerCase().includes('401') || data.error?.toLowerCase().includes('invalid')) {
-        setError('SerpAPI key is invalid. Check it at serpapi.com and try again.')
+        setError('Invalid API key. Check it at serpapi.com and try again.')
         return
       }
 
-      localStorage.setItem('serpapi_key', serpTrimmed)
-      localStorage.setItem('anthropic_key', anthropicTrimmed)
-      onSave(serpTrimmed, anthropicTrimmed)
+      localStorage.setItem('serpapi_key', trimmed)
+      onSave(trimmed)
     } catch {
-      setError('Could not verify keys. Check your internet connection and try again.')
+      setError('Could not verify key. Check your internet connection and try again.')
     } finally {
       setTesting(false)
     }
@@ -56,58 +48,29 @@ export default function ApiKeySetup({ onSave, initialSerp = '', initialAnthropic
           <p className="text-sm text-gray-500 mt-1">Master any topic — zero to expert</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/* SerpAPI */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1">
-              SerpAPI key
-            </label>
-            <p className="text-xs text-gray-400 mb-2">
-              Used for Google Scholar keyword chips.{' '}
-              <a href="https://serpapi.com/users/sign_up" target="_blank" rel="noopener noreferrer"
-                className="text-indigo-600 hover:underline">
-                Get one free
-              </a>{' '}
-              (100 searches/month)
-            </p>
-            <input
-              type="text"
-              value={serp}
-              onChange={(e) => setSerp(e.target.value)}
-              placeholder="Paste SerpAPI key"
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
-              autoFocus
-              suppressHydrationWarning
-            />
-          </div>
+        <div className="mb-6">
+          <h2 className="text-base font-semibold text-gray-800 mb-1">Enter your SerpAPI key</h2>
+          <p className="text-sm text-gray-500">
+            Used for Google Scholar keyword chips. Stored only in your browser.
+          </p>
+        </div>
 
-          {/* Anthropic */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1">
-              Anthropic API key
-            </label>
-            <p className="text-xs text-gray-400 mb-2">
-              Used to generate L2/L3 academic subfield dropdowns.{' '}
-              <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer"
-                className="text-indigo-600 hover:underline">
-                Get one at console.anthropic.com
-              </a>
-            </p>
-            <input
-              type="text"
-              value={anthropic}
-              onChange={(e) => setAnthropic(e.target.value)}
-              placeholder="sk-ant-…"
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
-              suppressHydrationWarning
-            />
-          </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="Paste your SerpAPI key here"
+            className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
+            autoFocus
+            suppressHydrationWarning
+          />
 
           {error && <p className="text-sm text-red-600">⚠️ {error}</p>}
 
           <button
             type="submit"
-            disabled={testing || !serp.trim() || !anthropic.trim()}
+            disabled={testing || !value.trim()}
             className="w-full py-3 bg-indigo-600 text-white rounded-xl font-medium text-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {testing ? (
@@ -119,14 +82,21 @@ export default function ApiKeySetup({ onSave, initialSerp = '', initialAnthropic
                 Verifying…
               </span>
             ) : (
-              'Save & Start'
+              'Save & Start Searching'
             )}
           </button>
         </form>
 
-        <p className="mt-6 pt-6 border-t border-gray-100 text-center text-xs text-gray-400">
-          Keys are stored only in your browser — never sent to our servers.
-        </p>
+        <div className="mt-6 pt-6 border-t border-gray-100 text-center">
+          <p className="text-xs text-gray-400">
+            Don&apos;t have a key?{' '}
+            <a href="https://serpapi.com/users/sign_up" target="_blank" rel="noopener noreferrer"
+              className="text-indigo-600 hover:underline font-medium">
+              Sign up at serpapi.com
+            </a>{' '}
+            — 100 free searches/month
+          </p>
+        </div>
       </div>
     </div>
   )
