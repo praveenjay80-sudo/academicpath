@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react'
 import { TaxonomyNode } from '@/lib/types'
 
-const LEVEL_LABELS = ['Field', 'Domain', 'Area', 'Topic', 'Specialty']
-const MAX_DEPTH = 4
+const LEVEL_LABELS = ['Field', 'Domain', 'Subfield', 'Topic', 'Specialty']
+const MAX_DEPTH = 3  // L0 → L1 → L2 → L3
 
 interface Column {
   nodes: TaxonomyNode[]
@@ -35,7 +35,7 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
       )
   }, [open, columns.length])
 
-  // colNodes is passed from the JSX call-site so we always have fresh data
+  // colNodes is passed from JSX so we always have fresh node objects at call time
   function handleSelect(colIdx: number, nodeId: string, colNodes: TaxonomyNode[]) {
     const node = colNodes.find((n) => n.id === nodeId)
     if (!node) return
@@ -44,28 +44,47 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
 
     const nextLevel = colIdx + 1
 
-    // Update this column's selection and add a loading placeholder for next
+    // Breadcrumb built from the current columns snapshot (fresh via closure)
+    const breadcrumb = columns
+      .slice(0, colIdx)
+      .map((col) => col.nodes.find((n) => n.id === col.selectedId)?.display_name)
+      .filter(Boolean)
+      .join(' › ')
+
+    // Update selection and add loading placeholder for next level
     setColumns((prev) => {
       const updated: Column[] = [
         ...prev.slice(0, colIdx),
         { ...prev[colIdx], selectedId: nodeId },
       ]
-      if (nextLevel <= MAX_DEPTH) {
-        return [...updated, { nodes: [], loading: true, selectedId: '', level: nextLevel }]
-      }
-      return updated
+      if (nextLevel > MAX_DEPTH) return updated
+      return [...updated, { nodes: [], loading: true, selectedId: '', level: nextLevel }]
     })
 
     if (nextLevel > MAX_DEPTH) return
 
-    // Fetch children for the next dropdown
-    fetch(`/api/taxonomy?parent=${node.id}&level=${nextLevel}`)
-      .then((r) => r.json())
-      .then((d) => {
-        const children: TaxonomyNode[] = d.nodes || []
+    // L0→L1: OpenAlex (reliable at this depth)
+    // L1→L2, L2→L3: Claude (OpenAlex hierarchy is noisy past L1)
+    const fetcher: Promise<TaxonomyNode[]> =
+      nextLevel <= 1
+        ? fetch(`/api/taxonomy?parent=${node.id}&level=${nextLevel}`)
+            .then((r) => r.json())
+            .then((d) => d.nodes || [])
+        : fetch(
+            `/api/taxonomy/claude?` +
+              new URLSearchParams({
+                parentName: node.display_name,
+                context: breadcrumb,
+                level: String(nextLevel),
+              })
+          )
+            .then((r) => r.json())
+            .then((d) => d.nodes || [])
+
+    fetcher
+      .then((children) => {
         setColumns((prev) => {
-          // Guard: abort if user already changed this selection
-          if (prev[colIdx]?.selectedId !== nodeId) return prev
+          if (prev[colIdx]?.selectedId !== nodeId) return prev  // stale, user changed selection
           if (children.length === 0) return prev.slice(0, colIdx + 1)
           return [
             ...prev.slice(0, colIdx + 1),
@@ -98,6 +117,9 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
         <div className="flex items-center gap-2">
           <span>🗂️</span>
           <h3 className="font-semibold text-gray-900 text-sm">Browse Academic Fields</h3>
+          <span className="text-[10px] text-indigo-400 bg-indigo-50 border border-indigo-100 rounded px-1.5 py-0.5">
+            L2+ powered by Claude
+          </span>
         </div>
         <button
           onClick={() => { setOpen(false); setColumns([]) }}
@@ -115,11 +137,16 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
 
       <div className="flex flex-wrap items-center gap-2">
         {columns.map((col, idx) => (
-          <div key={`${idx}-${col.level}`} className="flex items-center gap-2">
+          <div key={`col-${idx}`} className="flex items-center gap-2">
             {idx > 0 && <span className="text-gray-300 text-base select-none">›</span>}
 
             {col.loading ? (
-              <div className="h-8 w-36 bg-gray-100 rounded-lg animate-pulse" />
+              <div className="flex items-center gap-1.5">
+                <div className="h-8 w-40 bg-gray-100 rounded-lg animate-pulse" />
+                {col.level >= 2 && (
+                  <span className="text-[10px] text-indigo-400 animate-pulse">Claude…</span>
+                )}
+              </div>
             ) : col.nodes.length === 0 ? null : (
               <select
                 value={col.selectedId}
@@ -132,7 +159,7 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
                   {LEVEL_LABELS[col.level] ?? `Level ${col.level}`}…
                 </option>
                 {col.nodes.map((n) => (
-                  <option key={n.id} value={n.id}>
+                  <option key={n.id} value={n.id} title={n.description}>
                     {n.display_name}
                   </option>
                 ))}
@@ -143,7 +170,9 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
       </div>
 
       {columns[0] && !columns[0].loading && columns[0].nodes.length === 0 && (
-        <p className="text-xs text-red-400 mt-2">Could not load fields — check your connection.</p>
+        <p className="text-xs text-red-400 mt-2">
+          Could not load fields — check your connection.
+        </p>
       )}
     </div>
   )
