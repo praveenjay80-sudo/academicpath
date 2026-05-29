@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { Roadmap } from '@/lib/types'
 
-export const maxDuration = 30
+export const maxDuration = 45
 
 const MODEL_FALLBACKS = [
   'claude-haiku-4-5-20251001',
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 
   const client = new Anthropic({ apiKey })
 
-  const prompt = `Generate a comprehensive learning roadmap for mastering "${topic}".
+  const prompt = `Generate a comprehensive, opinionated learning roadmap for mastering "${topic}".
 
 Return ONLY valid JSON — no markdown fences, no explanation:
 {
@@ -30,46 +30,47 @@ Return ONLY valid JSON — no markdown fences, no explanation:
   "stages": [
     {
       "level": "Beginner",
-      "title": "short stage title",
-      "duration": "e.g. 1-3 months",
-      "description": "What to focus on and what you will be able to do after this stage",
+      "title": "short evocative stage title",
+      "duration": "e.g. 2-3 months",
+      "description": "What to focus on and what you will be capable of after completing this stage",
       "concepts": ["concept1", "concept2", "concept3", "concept4", "concept5"],
-      "texts": ["Authoritative book or paper title 1", "Title 2", "Title 3"]
+      "works": [
+        {
+          "title": "Exact book or paper title",
+          "author": "Author name(s)",
+          "year": "YYYY",
+          "kind": "book",
+          "type": "pedagogical",
+          "note": "One sentence on why this specific work matters at this stage"
+        },
+        {
+          "title": "Exact paper title",
+          "author": "Author name(s)",
+          "year": "YYYY",
+          "kind": "paper",
+          "type": "seminal",
+          "note": "One sentence on why this specific work matters at this stage"
+        }
+      ]
     },
-    {
-      "level": "Intermediate",
-      "title": "short stage title",
-      "duration": "...",
-      "description": "...",
-      "concepts": ["..."],
-      "texts": ["..."]
-    },
-    {
-      "level": "Advanced",
-      "title": "short stage title",
-      "duration": "...",
-      "description": "...",
-      "concepts": ["..."],
-      "texts": ["..."]
-    },
-    {
-      "level": "Research",
-      "title": "short stage title",
-      "duration": "Ongoing",
-      "description": "...",
-      "concepts": ["..."],
-      "texts": ["..."]
-    }
+    { "level": "Intermediate", ... },
+    { "level": "Advanced", ... },
+    { "level": "Research", ... }
   ],
-  "branches": ["specialization1", "specialization2", "specialization3", "specialization4"]
+  "branches": ["specialization1", "specialization2", "specialization3", "specialization4", "specialization5"]
 }
 
 Rules:
 - Exactly 4 stages in order: Beginner, Intermediate, Advanced, Research
-- 5-6 concepts per stage (specific, learnable things)
-- 3 key texts per stage (real, well-known books or seminal papers — no URLs)
-- 4-6 branches (major specializations someone could pursue)
-- Be specific and opinionated — this is a curated guide, not a generic list`
+- 5 concepts per stage — specific learnable skills or ideas, not vague categories
+- 4-6 works per stage — real, verifiable titles only (no fabrications)
+- Each work must have kind: "paper" or "book", and type: one of:
+    "breakthrough" = paradigm-shifting, changed the field permanently
+    "seminal"      = foundational, widely cited, shaped the direction of research
+    "pedagogical"  = best for learning, clear exposition, ideal for students
+- Include at least 1 paper and 1 book per stage where possible
+- The note must say WHY this work is essential at THIS stage, not just what it is
+- 4-6 branches at the end`
 
   let lastError = ''
 
@@ -77,7 +78,7 @@ Rules:
     try {
       const message = await client.messages.create({
         model,
-        max_tokens: 2000,
+        max_tokens: 3000,
         messages: [{ role: 'user', content: prompt }],
       })
 

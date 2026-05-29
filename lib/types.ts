@@ -60,13 +60,22 @@ export interface OpenAlexTopic {
   link: string         // https://openalex.org/T...
 }
 
+export interface RoadmapWork {
+  title: string
+  author: string
+  year: string
+  kind: 'paper' | 'book'
+  type: 'breakthrough' | 'seminal' | 'pedagogical'
+  note: string
+}
+
 export interface RoadmapStage {
   level: 'Beginner' | 'Intermediate' | 'Advanced' | 'Research'
   title: string
   duration: string
   description: string
   concepts: string[]
-  texts: string[]
+  works: RoadmapWork[]
 }
 
 export interface Roadmap {
