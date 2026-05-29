@@ -60,6 +60,22 @@ export interface OpenAlexTopic {
   link: string         // https://openalex.org/T...
 }
 
+export interface RoadmapStage {
+  level: 'Beginner' | 'Intermediate' | 'Advanced' | 'Research'
+  title: string
+  duration: string
+  description: string
+  concepts: string[]
+  texts: string[]
+}
+
+export interface Roadmap {
+  overview: string
+  prerequisites: string[]
+  stages: RoadmapStage[]
+  branches: string[]
+}
+
 export interface TaxonomyNode {
   id: string           // e.g. "C127413603"
   display_name: string
