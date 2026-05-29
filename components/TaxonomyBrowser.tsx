@@ -24,24 +24,27 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
   const [anthropicKey, setAnthropicKey] = useState('')
   const [keyInput, setKeyInput] = useState('')
   const [showKeyInput, setShowKeyInput] = useState(false)
+  const [needKeyForLevel, setNeedKeyForLevel] = useState<number | null>(null)
 
-  // Keep a ref so async callbacks always see the latest key
-  const keyRef = useRef(anthropicKey)
+  const keyRef = useRef('')
   useEffect(() => { keyRef.current = anthropicKey }, [anthropicKey])
 
+  // Load stored Anthropic key from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem('anthropic_key') || ''
     setAnthropicKey(stored)
     keyRef.current = stored
   }, [])
 
+  // Load L0 whenever the panel opens (no key required — uses OpenAlex)
   useEffect(() => {
-    if (open && columns.length === 0 && anthropicKey) loadL0()
+    if (open && columns.length === 0) loadL0()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, anthropicKey])
+  }, [open])
 
   function loadL0() {
     setError(null)
+    setNeedKeyForLevel(null)
     setColumns([{ nodes: [], loading: true, selectedId: '', level: 0 }])
     fetch('/api/taxonomy?level=0')
       .then(r => r.json())
@@ -63,7 +66,8 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
     keyRef.current = k
     setKeyInput('')
     setShowKeyInput(false)
-    if (open && columns.length === 0) loadL0()
+    setNeedKeyForLevel(null)
+    setError(null)
   }
 
   async function handleSelect(colIdx: number, nodeId: string, colNodes: TaxonomyNode[]) {
@@ -72,10 +76,10 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
 
     onSearch(node.display_name)
     setError(null)
+    setNeedKeyForLevel(null)
 
     const nextLevel = colIdx + 1
 
-    // Build updated columns synchronously from current snapshot
     const updatedCols: Column[] = columns
       .slice(0, colIdx + 1)
       .map((col, i) => (i === colIdx ? { ...col, selectedId: nodeId } : col))
@@ -85,21 +89,25 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
       return
     }
 
-    // Breadcrumb for Claude context
     const breadcrumb = updatedCols
       .slice(0, colIdx)
       .map(col => col.nodes.find(n => n.id === col.selectedId)?.display_name)
       .filter(Boolean)
       .join(' › ')
 
-    // Show loading placeholder immediately
+    // L2+ requires Anthropic key
+    if (nextLevel >= 2 && !keyRef.current) {
+      setColumns(updatedCols)
+      setNeedKeyForLevel(nextLevel)
+      return
+    }
+
     setColumns([...updatedCols, { nodes: [], loading: true, selectedId: '', level: nextLevel }])
 
-    // L0→L1: OpenAlex. L1→L2: Claude (fallback OpenAlex). L2→L3: Claude only.
     let children: TaxonomyNode[] = []
 
     if (nextLevel <= 1) {
-      // OpenAlex
+      // OpenAlex for L1
       try {
         const r = await fetch(`/api/taxonomy?parent=${node.id}&level=${nextLevel}`)
         const d = await r.json()
@@ -112,7 +120,7 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
         return
       }
     } else {
-      // Claude
+      // Claude for L2/L3
       const key = keyRef.current
       try {
         const r = await fetch(
@@ -128,7 +136,7 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
         children = d.nodes || []
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Claude request failed'
-        // L2 fallback: try OpenAlex if Claude fails
+        // L2 fallback: try OpenAlex
         if (nextLevel === 2) {
           try {
             const r2 = await fetch(`/api/taxonomy?parent=${node.id}&level=${nextLevel}`)
@@ -137,12 +145,12 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
               children = d2.nodes
             } else {
               setColumns(updatedCols)
-              setError(`Claude: ${msg}. OpenAlex also returned nothing.`)
+              setError(`Claude error: ${msg}`)
               return
             }
           } catch {
             setColumns(updatedCols)
-            setError(`Claude: ${msg}`)
+            setError(`Claude error: ${msg}`)
             return
           }
         } else {
@@ -155,7 +163,7 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
 
     if (children.length === 0) {
       setColumns(updatedCols)
-      setError('No subfields found. Try a different selection.')
+      setError('No subfields found for this selection.')
       return
     }
 
@@ -195,18 +203,18 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
           </button>
         </div>
         <button
-          onClick={() => { setOpen(false); setColumns([]); setError(null); setShowKeyInput(false) }}
+          onClick={() => { setOpen(false); setColumns([]); setError(null); setShowKeyInput(false); setNeedKeyForLevel(null) }}
           className="text-xs text-gray-400 hover:text-gray-600"
         >
           ✕ Close
         </button>
       </div>
 
-      {/* Key input */}
+      {/* Key input panel */}
       {showKeyInput && (
         <div className="mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-xl">
           <p className="text-xs text-indigo-700 font-medium mb-1">
-            Anthropic API key — for L2/L3 subfields
+            Anthropic API key — needed for L2 Subfields and L3 Topics
           </p>
           <p className="text-xs text-indigo-500 mb-2">
             Get one at{' '}
@@ -235,13 +243,6 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
         </div>
       )}
 
-      {/* No key notice */}
-      {!anthropicKey && !showKeyInput && (
-        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-          Click <strong>🔑 Add Anthropic key</strong> above to enable subfield browsing (L2/L3).
-        </p>
-      )}
-
       {/* Breadcrumb */}
       {breadcrumb && (
         <p className="text-xs text-indigo-700 font-medium bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-1.5 mb-3 inline-block">
@@ -249,35 +250,50 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
         </p>
       )}
 
-      {/* Dropdowns */}
-      {anthropicKey && (
-        <div className="flex flex-wrap items-center gap-2">
-          {columns.map((col, idx) => (
-            <div key={`col-${idx}`} className="flex items-center gap-2">
-              {idx > 0 && <span className="text-gray-300 select-none">›</span>}
-              {col.loading ? (
-                <div className="flex items-center gap-1.5">
-                  <div className="h-8 w-40 bg-gray-100 rounded-lg animate-pulse" />
-                  {col.level >= 2 && (
-                    <span className="text-[10px] text-indigo-400 animate-pulse">Claude…</span>
-                  )}
-                </div>
-              ) : col.nodes.length === 0 ? null : (
-                <select
-                  value={col.selectedId}
-                  onChange={e => e.target.value && handleSelect(idx, e.target.value, col.nodes)}
-                  className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all cursor-pointer max-w-[240px]"
-                >
-                  <option value="">{LEVEL_LABELS[col.level] ?? `Level ${col.level}`}…</option>
-                  {col.nodes.map(n => (
-                    <option key={n.id} value={n.id} title={n.description}>
-                      {n.display_name}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-          ))}
+      {/* Dropdowns — always rendered, no key gate */}
+      <div className="flex flex-wrap items-center gap-2">
+        {columns.map((col, idx) => (
+          <div key={`col-${idx}`} className="flex items-center gap-2">
+            {idx > 0 && <span className="text-gray-300 select-none">›</span>}
+            {col.loading ? (
+              <div className="flex items-center gap-1.5">
+                <div className="h-8 w-40 bg-gray-100 rounded-lg animate-pulse" />
+                {col.level >= 2 && (
+                  <span className="text-[10px] text-indigo-400 animate-pulse">Claude…</span>
+                )}
+              </div>
+            ) : col.nodes.length === 0 ? null : (
+              <select
+                value={col.selectedId}
+                onChange={e => e.target.value && handleSelect(idx, e.target.value, col.nodes)}
+                className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all cursor-pointer max-w-[240px]"
+              >
+                <option value="">{LEVEL_LABELS[col.level] ?? `Level ${col.level}`}…</option>
+                {col.nodes.map(n => (
+                  <option key={n.id} value={n.id} title={n.description}>
+                    {n.display_name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Inline prompt when Anthropic key is needed */}
+      {needKeyForLevel !== null && !showKeyInput && (
+        <div className="mt-3 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+          <span className="text-amber-500">🔑</span>
+          <p className="text-xs text-amber-700 flex-1">
+            An Anthropic API key is needed to load{' '}
+            <strong>{LEVEL_LABELS[needKeyForLevel] ?? `Level ${needKeyForLevel}`}s</strong>.
+          </p>
+          <button
+            onClick={() => setShowKeyInput(true)}
+            className="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-1 hover:bg-indigo-100 font-medium flex-shrink-0"
+          >
+            Add key
+          </button>
         </div>
       )}
 
