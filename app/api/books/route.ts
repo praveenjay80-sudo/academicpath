@@ -9,7 +9,8 @@ export async function GET(request: NextRequest) {
   if (!apiKey) return NextResponse.json({ error: 'SerpAPI key required' }, { status: 401 })
 
   try {
-    const url = `https://serpapi.com/search.json?engine=google_books&q=${encodeURIComponent(query)}&api_key=${apiKey}`
+    // tbm=bks is Google's Books search tab
+    const url = `https://serpapi.com/search.json?engine=google&tbm=bks&q=${encodeURIComponent(query)}&num=15&api_key=${apiKey}`
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
 
     if (!res.ok) {
@@ -21,16 +22,15 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await res.json()
-    const raw = (data.books_results || []) as Array<Record<string, unknown>>
+    const raw = (data.organic_results || []) as Array<Record<string, unknown>>
 
     const books: Book[] = raw.slice(0, 15).map((item, i) => {
-      const authors = Array.isArray(item.authors)
-        ? (item.authors as string[]).join(', ')
-        : (item.authors as string | undefined) ?? 'Unknown'
+      // author field is a string in tbm=bks results
+      const authors = (item.author as string | undefined) ?? 'Unknown'
 
-      // publish_info is usually "YYYY - Publisher"
-      const publishInfo = (item.publish_info as string | undefined) ?? ''
-      const yearMatch = publishInfo.match(/\b(1[89]\d{2}|20\d{2})\b/)
+      // date is usually "YYYY" or "Month YYYY"
+      const dateStr = (item.date as string | undefined) ?? ''
+      const yearMatch = dateStr.match(/\b(1[89]\d{2}|20\d{2})\b/)
       const year = yearMatch ? yearMatch[1] : ''
 
       return {
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
         reviews: item.reviews as number | undefined,
         thumbnail: item.thumbnail as string | undefined,
         link: (item.link as string) || `https://books.google.com/books?q=${encodeURIComponent(query)}`,
-        description: item.description as string | undefined,
+        description: item.snippet as string | undefined,
       }
     })
 
