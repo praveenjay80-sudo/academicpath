@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { TaxonomyNode } from '@/lib/types'
 
-export const maxDuration = 30  // seconds — prevents Vercel 10s default from killing Claude
+export const maxDuration = 30
 
 const LEVEL_LABELS: Record<number, string> = {
   1: 'major domains or branches',
@@ -10,6 +10,15 @@ const LEVEL_LABELS: Record<number, string> = {
   3: 'research topics',
   4: 'specializations',
 }
+
+// Tried in order until one succeeds — covers both old and new API keys
+const MODEL_FALLBACKS = [
+  'claude-haiku-4-5-20251001',
+  'claude-sonnet-4-6',
+  'claude-3-5-sonnet-20241022',
+  'claude-3-5-haiku-20241022',
+  'claude-3-haiku-20240307',
+]
 
 export async function GET(request: NextRequest) {
   const parentName = request.nextUrl.searchParams.get('parentName')
@@ -40,37 +49,49 @@ export async function GET(request: NextRequest) {
     `Return ONLY a valid JSON array, no markdown fences, no explanation:\n` +
     `[{"name":"Name","description":"One sentence."}]`
 
-  try {
-    const message = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 800,
-      messages: [{ role: 'user', content: prompt }],
-    })
+  let lastError = ''
 
-    const raw = (message.content[0] as { type: string; text: string }).text.trim()
-    const json = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
-    const parsed: { name: string; description: string }[] = JSON.parse(json)
+  for (const model of MODEL_FALLBACKS) {
+    try {
+      const message = await client.messages.create({
+        model,
+        max_tokens: 800,
+        messages: [{ role: 'user', content: prompt }],
+      })
 
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      return NextResponse.json({ error: 'Claude returned no results — try again' }, { status: 502 })
+      const raw = (message.content[0] as { type: string; text: string }).text.trim()
+      const json = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+      const parsed: { name: string; description: string }[] = JSON.parse(json)
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        return NextResponse.json({ error: 'Claude returned no results — try again' }, { status: 502 })
+      }
+
+      const nodes: TaxonomyNode[] = parsed.map((item) => ({
+        id: `cl-${item.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`,
+        display_name: item.name,
+        level,
+        works_count: 0,
+        description: item.description ?? '',
+      }))
+
+      return NextResponse.json({ nodes })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('401') || msg.includes('invalid_api_key') || msg.includes('authentication')) {
+        return NextResponse.json({ error: 'Invalid Anthropic API key — re-enter it via 🔑' }, { status: 401 })
+      }
+      // 404 = model not available on this key, try the next one
+      if (msg.includes('404') || msg.includes('not_found')) {
+        lastError = msg
+        continue
+      }
+      // Any other error: surface it immediately
+      console.error('Claude taxonomy error:', msg)
+      return NextResponse.json({ error: `Claude error: ${msg.slice(0, 120)}` }, { status: 502 })
     }
-
-    const nodes: TaxonomyNode[] = parsed.map((item) => ({
-      id: `cl-${item.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`,
-      display_name: item.name,
-      level,
-      works_count: 0,
-      description: item.description ?? '',
-    }))
-
-    return NextResponse.json({ nodes })
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    // Surface auth errors directly so users know to fix their key
-    if (msg.includes('401') || msg.includes('invalid') || msg.includes('auth')) {
-      return NextResponse.json({ error: 'Invalid Anthropic API key — re-enter it via 🔑' }, { status: 401 })
-    }
-    console.error('Claude taxonomy error:', msg)
-    return NextResponse.json({ error: `Claude error: ${msg.slice(0, 120)}` }, { status: 502 })
   }
+
+  console.error('All Claude models failed:', lastError)
+  return NextResponse.json({ error: 'No Claude model available for this API key.' }, { status: 502 })
 }
