@@ -13,42 +13,18 @@ const SURVEY_WORDS = [
   'tutorial', 'handbook', 'guide', 'fundamentals', 'principles',
 ]
 
-interface TavilyResult {
-  title: string
-  url: string
-  content: string
-  score: number
-  published_date?: string
-}
-
-function parseCitations(content: string): number {
-  // Google Scholar: "Cited by 1,234"
-  const gs = content.match(/Cited by ([\d,]+)/i)
-  if (gs) return parseInt(gs[1].replace(/,/g, ''), 10)
-  // Semantic Scholar / others: "1,234 Citations" or "Citations: 1,234"
-  const ss = content.match(/([\d,]+)\s+[Cc]itations?|[Cc]itations?[:\s]+([\d,]+)/)
-  if (ss) return parseInt((ss[1] ?? ss[2]).replace(/,/g, ''), 10)
-  return 0
-}
-
-function parseYear(content: string, published_date?: string): number {
-  if (published_date) {
-    const y = new Date(published_date).getFullYear()
-    if (y > 1900 && y <= new Date().getFullYear() + 1) return y
+interface SerpResult {
+  title?: string
+  link?: string
+  snippet?: string
+  publication_info?: {
+    summary?: string
+    authors?: Array<{ name: string }>
   }
-  const match = content.match(/\b(19[5-9]\d|20[0-2]\d)\b/)
-  return match ? parseInt(match[0]) : 0
-}
-
-function parseAuthors(content: string): string {
-  const firstLine = content.split('\n')[0] || ''
-  const parts = firstLine.split(' - ')
-  const candidate = parts[0]?.trim() ?? ''
-  // Reasonable author string: not too long, no URL characters
-  if (candidate.length > 0 && candidate.length < 120 && !candidate.includes('http')) {
-    return candidate
+  inline_links?: {
+    cited_by?: { total?: number }
   }
-  return 'Unknown'
+  resources?: Array<{ link: string; file_format?: string }>
 }
 
 function getTag(title: string, year: number, citations: number): PaperTag {
@@ -59,109 +35,74 @@ function getTag(title: string, year: number, citations: number): PaperTag {
   return 'INFLUENTIAL'
 }
 
+function parseAuthorsAndYear(summary: string | undefined): { authors: string; year: number } {
+  if (!summary) return { authors: 'Unknown', year: 0 }
+  // Format: "A Smith, B Jones - Journal, 2023 - publisher.com"
+  const parts = summary.split(' - ')
+  const authors = parts[0]?.trim() || 'Unknown'
+  const yearMatch = summary.match(/\b(19[5-9]\d|20[0-2]\d)\b/)
+  const year = yearMatch ? parseInt(yearMatch[0]) : 0
+  return { authors, year }
+}
+
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get('q')
   if (!query) return NextResponse.json({ error: 'Query is required' }, { status: 400 })
 
-  const tavilyKey = request.headers.get('x-tavily-key') || process.env.TAVILY_API_KEY
-  const serpApiKey = request.headers.get('x-serpapi-key') || process.env.SERPAPI_KEY
-
-  if (!tavilyKey) {
-    return NextResponse.json({ error: 'Tavily API key required' }, { status: 401 })
+  const apiKey = request.headers.get('x-serpapi-key') || process.env.SERPAPI_KEY
+  if (!apiKey) {
+    return NextResponse.json({ error: 'SerpAPI key required' }, { status: 401 })
   }
 
-  // ── Tavily: academic papers across multiple sources ──────────────────────
-  const tavilyPromise = fetch('https://api.tavily.com/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      api_key: tavilyKey,
-      query: `${query} research paper`,
-      search_depth: 'advanced',
-      include_domains: [
-        'arxiv.org',
-        'semanticscholar.org',
-        'scholar.google.com',
-        'pubmed.ncbi.nlm.nih.gov',
-        'dl.acm.org',
-        'ieeexplore.ieee.org',
-        'nature.com',
-        'sciencedirect.com',
-      ],
-      max_results: 25,
-    }),
-    signal: AbortSignal.timeout(15000),
-  })
+  const url = new URL('https://serpapi.com/search')
+  url.searchParams.set('engine', 'google_scholar')
+  url.searchParams.set('q', query)
+  url.searchParams.set('num', '20')
+  url.searchParams.set('api_key', apiKey)
 
-  // ── SerpAPI: related keyword chips (optional) ─────────────────────────────
-  const serpPromise = serpApiKey
-    ? fetch(
-        `https://serpapi.com/search?engine=google_scholar&q=${encodeURIComponent(query)}&num=5&api_key=${serpApiKey}`,
-        { signal: AbortSignal.timeout(8000) }
-      )
-    : Promise.reject('no key')
-
-  const [tavilyResult, serpResult] = await Promise.allSettled([tavilyPromise, serpPromise])
-
-  // ── Parse Tavily papers ───────────────────────────────────────────────────
-  if (tavilyResult.status === 'rejected') {
-    console.error('Tavily fetch failed:', tavilyResult.reason)
-    return NextResponse.json({ error: 'Failed to reach Tavily API' }, { status: 502 })
+  let res: Response
+  try {
+    res = await fetch(url.toString(), { signal: AbortSignal.timeout(15000) })
+  } catch {
+    return NextResponse.json({ error: 'Failed to reach SerpAPI' }, { status: 502 })
   }
 
-  const tavilyRes = tavilyResult.value
-  if (!tavilyRes.ok) {
-    const body = await tavilyRes.text().catch(() => '')
-    console.error('Tavily error:', tavilyRes.status, body)
-    if (tavilyRes.status === 401) {
-      return NextResponse.json({ error: 'Invalid Tavily API key' }, { status: 401 })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    if (res.status === 401 || body.includes('Invalid API key')) {
+      return NextResponse.json({ error: 'Invalid SerpAPI key' }, { status: 401 })
     }
-    return NextResponse.json({ error: `Tavily error (${tavilyRes.status})` }, { status: 502 })
+    return NextResponse.json({ error: `SerpAPI error (${res.status})` }, { status: 502 })
   }
 
-  const tavilyData = await tavilyRes.json().catch(() => ({ results: [] }))
-  const results: TavilyResult[] = tavilyData.results || []
+  const data = await res.json().catch(() => ({}))
+  const organic: SerpResult[] = data.organic_results || []
 
-  const papers: Paper[] = results
-    .filter(r => {
-      if (!r.title || !r.url) return false
-      // Drop Google Scholar author profiles — they are not papers
-      if (/scholar\.google\.com\/citations\?.*user=/i.test(r.url)) return false
-      // Drop Scholar search-result list pages
-      if (/scholar\.google\.com\/scholar\?/.test(r.url) && !r.url.includes('cluster')) return false
-      return true
-    })
+  const papers: Paper[] = organic
+    .filter(r => r.title)
     .map(r => {
-      const citations = parseCitations(r.content)
-      const year = parseYear(r.content, r.published_date)
-      const authors = parseAuthors(r.content)
-      const tag = getTag(r.title, year, citations)
+      const { authors, year } = parseAuthorsAndYear(r.publication_info?.summary)
+      const citations = r.inline_links?.cited_by?.total ?? 0
+      const pdfLink = r.resources?.find(x => x.file_format === 'PDF')?.link
+      const tag = getTag(r.title!, year, citations)
       return {
-        id: r.url,
-        title: r.title,
+        id: r.link || r.title!,
+        title: r.title!,
         authors,
         year,
         citations,
-        link: r.url,
+        link: r.link || '',
+        pdfLink,
         tag,
       }
     })
 
-  // Sort by citations descending
+  // Sort by citation count descending
   papers.sort((a, b) => b.citations - a.citations)
 
-  // ── Parse SerpAPI keywords (optional) ─────────────────────────────────────
-  let keywords: string[] = []
-  if (serpResult.status === 'fulfilled') {
-    try {
-      const serpData = await serpResult.value.json()
-      keywords = (serpData.related_searches || [])
-        .map((s: { query: string }) => s.query)
-        .filter(Boolean)
-    } catch {
-      // non-critical
-    }
-  }
+  const keywords: string[] = (data.related_searches || [])
+    .map((s: { query: string }) => s.query)
+    .filter(Boolean)
 
   return NextResponse.json({ papers, keywords })
 }

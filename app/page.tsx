@@ -102,7 +102,7 @@ export default function Home() {
   const [currentQuery, setCurrentQuery] = useState('')
 
   useEffect(() => {
-    setApiKey(localStorage.getItem('tavily_key'))
+    setApiKey(localStorage.getItem('serpapi_key'))
     setKeyChecked(true)
   }, [])
 
@@ -121,11 +121,7 @@ export default function Home() {
     setConcepts([])
     setKeywords([])
 
-    const serpKey = localStorage.getItem('serpapi_key')
-    const headers: HeadersInit = {
-      ...(apiKey ? { 'x-tavily-key': apiKey } : {}),
-      ...(serpKey ? { 'x-serpapi-key': serpKey } : {}),
-    }
+    const headers: HeadersInit = apiKey ? { 'x-serpapi-key': apiKey } : {}
 
     // ① CrossRef → papers + SerpAPI → keywords
     fetch(`/api/papers?q=${encodeURIComponent(query)}`, { headers })
@@ -161,7 +157,7 @@ export default function Home() {
   }
 
   const handleClearKey = () => {
-    localStorage.removeItem('tavily_key')
+    localStorage.removeItem('serpapi_key')
     setApiKey(null)
     setSearched(false)
   }

@@ -21,16 +21,16 @@ export default function ApiKeySetup({ onSave }: Props) {
 
     try {
       const res = await fetch('/api/papers?q=test', {
-        headers: { 'x-tavily-key': trimmed },
+        headers: { 'x-serpapi-key': trimmed },
       })
       const data = await res.json()
 
       if (res.status === 401 || data.error?.toLowerCase().includes('invalid')) {
-        setError('Invalid Tavily API key. Check it at app.tavily.com and try again.')
+        setError('Invalid SerpAPI key. Check it at serpapi.com and try again.')
         return
       }
 
-      localStorage.setItem('tavily_key', trimmed)
+      localStorage.setItem('serpapi_key', trimmed)
       onSave(trimmed)
     } catch {
       setError('Could not verify key. Check your internet connection and try again.')
@@ -49,9 +49,9 @@ export default function ApiKeySetup({ onSave }: Props) {
         </div>
 
         <div className="mb-6">
-          <h2 className="text-base font-semibold text-gray-800 mb-1">Enter your Tavily API key</h2>
+          <h2 className="text-base font-semibold text-gray-800 mb-1">Enter your SerpAPI key</h2>
           <p className="text-sm text-gray-500">
-            Powers Google Scholar paper search, sorted by citations. Stored only in your browser.
+            Powers Google Scholar paper search sorted by citations. Stored only in your browser.
           </p>
         </div>
 
@@ -60,7 +60,7 @@ export default function ApiKeySetup({ onSave }: Props) {
             type="text"
             value={value}
             onChange={e => setValue(e.target.value)}
-            placeholder="tvly-…"
+            placeholder="Paste your SerpAPI key here"
             className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
             autoFocus
             suppressHydrationWarning
@@ -90,11 +90,11 @@ export default function ApiKeySetup({ onSave }: Props) {
         <div className="mt-6 pt-6 border-t border-gray-100 text-center">
           <p className="text-xs text-gray-400">
             Don&apos;t have a key?{' '}
-            <a href="https://app.tavily.com" target="_blank" rel="noopener noreferrer"
+            <a href="https://serpapi.com/users/sign_up" target="_blank" rel="noopener noreferrer"
               className="text-indigo-600 hover:underline font-medium">
-              Sign up at app.tavily.com
+              Sign up at serpapi.com
             </a>{' '}
-            — free tier available
+            — 100 free searches/month
           </p>
         </div>
       </div>
