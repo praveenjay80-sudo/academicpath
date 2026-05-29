@@ -16,11 +16,9 @@ export interface Book {
   title: string
   authors: string
   year: string
-  rating?: number
-  reviews?: number
+  editions?: number
   thumbnail?: string
   link: string
-  description?: string
 }
 
 export interface ScholarBook {

@@ -154,8 +154,8 @@ export default function Home() {
       .catch(err => setPapersError(err.message || 'Failed to load papers'))
       .finally(() => setLoadingPapers(false))
 
-    // ② Google Books
-    fetch(`/api/books?q=${encodeURIComponent(query)}`, { headers })
+    // ② Open Library books
+    fetch(`/api/books?q=${encodeURIComponent(query)}`)
       .then(r => r.json())
       .then(data => {
         if (data.error) throw new Error(data.error)
@@ -279,7 +279,7 @@ export default function Home() {
                 <ColHeader
                   emoji="📚"
                   title="Books"
-                  subtitle="Google Books · rated &amp; reviewed"
+                  subtitle="Open Library · by edition count"
                   count={olBooks.length}
                   loading={loadingOL}
                 />

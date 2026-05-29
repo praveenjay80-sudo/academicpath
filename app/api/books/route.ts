@@ -5,46 +5,29 @@ export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get('q')
   if (!query) return NextResponse.json({ error: 'Query required' }, { status: 400 })
 
-  const apiKey = request.headers.get('x-serpapi-key') || process.env.SERPAPI_KEY
-  if (!apiKey) return NextResponse.json({ error: 'SerpAPI key required' }, { status: 401 })
-
   try {
-    // tbm=bks is Google's Books search tab
-    const url = `https://serpapi.com/search.json?engine=google&tbm=bks&q=${encodeURIComponent(query)}&num=15&api_key=${apiKey}`
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      if (res.status === 401 || body.includes('Invalid API key')) {
-        return NextResponse.json({ error: 'Invalid SerpAPI key' }, { status: 401 })
-      }
-      return NextResponse.json({ error: `Google Books error: ${res.status}` }, { status: 502 })
-    }
+    const res = await fetch(
+      `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=15&fields=key,title,author_name,first_publish_year,edition_count,cover_i&type=work`,
+      { signal: AbortSignal.timeout(10000) }
+    )
+    if (!res.ok) return NextResponse.json({ error: `Open Library error: ${res.status}` }, { status: 502 })
 
     const data = await res.json()
-    const raw = (data.organic_results || []) as Array<Record<string, unknown>>
+    const docs = (data.docs || []) as Array<Record<string, unknown>>
 
-    const books: Book[] = raw.slice(0, 15).map((item, i) => {
-      // author field is a string in tbm=bks results
-      const authors = (item.author as string | undefined) ?? 'Unknown'
-
-      // date is usually "YYYY" or "Month YYYY"
-      const dateStr = (item.date as string | undefined) ?? ''
-      const yearMatch = dateStr.match(/\b(1[89]\d{2}|20\d{2})\b/)
-      const year = yearMatch ? yearMatch[1] : ''
-
+    const books: Book[] = docs.slice(0, 12).map((doc, i) => {
+      const authorNames = doc.author_name as string[] | undefined
+      const coverId = doc.cover_i as number | undefined
       return {
-        id: String(i),
-        title: (item.title as string) || 'Unknown Title',
-        authors,
-        year,
-        rating: item.rating as number | undefined,
-        reviews: item.reviews as number | undefined,
-        thumbnail: item.thumbnail as string | undefined,
-        link: (item.link as string) || `https://books.google.com/books?q=${encodeURIComponent(query)}`,
-        description: item.snippet as string | undefined,
+        id: (doc.key as string) || String(i),
+        title: (doc.title as string) || 'Unknown Title',
+        authors: authorNames ? authorNames.slice(0, 3).join(', ') : 'Unknown',
+        year: String((doc.first_publish_year as number) || ''),
+        editions: (doc.edition_count as number) || 0,
+        thumbnail: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg` : undefined,
+        link: `https://openlibrary.org${doc.key}`,
       }
-    })
+    }).sort((a, b) => (b.editions ?? 0) - (a.editions ?? 0))
 
     return NextResponse.json({ books })
   } catch (err) {
