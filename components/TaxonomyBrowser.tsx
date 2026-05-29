@@ -137,16 +137,22 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
     fetcher
       .then((children) => {
         setColumns((prev) => {
-          // Guard: if user changed selection while we were loading, discard
+          // Guard: if user changed selection while loading, discard stale result
           if (prev[colIdx]?.selectedId !== nodeId) return prev
-          const base = prev.slice(0, colIdx + 1)
-          if (children.length === 0) return base
-          return [...base, { nodes: children, loading: false, selectedId: '', level: nextLevel }]
+          if (children.length === 0) {
+            // Treat empty as an error so it's visible
+            setError('Claude returned no subfields — check your API key or try again')
+            return prev.slice(0, colIdx + 1)
+          }
+          return [
+            ...prev.slice(0, colIdx + 1),
+            { nodes: children, loading: false, selectedId: '', level: nextLevel },
+          ]
         })
       })
       .catch((e: Error) => {
         setColumns((prev) => prev.slice(0, colIdx + 1))
-        setError(e.message || 'Failed to load subfields')
+        setError(e.message || 'Failed to load subfields — check your Anthropic key')
       })
   }
 
@@ -268,9 +274,24 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
 
       {/* Error */}
       {error && (
-        <p className="text-xs text-red-500 mt-2 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5">
-          ⚠️ {error}
-        </p>
+        <div className="mt-3 flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+          <span className="text-red-500 text-sm mt-0.5">⚠️</span>
+          <div className="flex-1">
+            <p className="text-xs text-red-700 font-medium">{error}</p>
+            <button
+              onClick={() => setError(null)}
+              className="text-[10px] text-red-400 hover:text-red-600 mt-0.5"
+            >
+              Dismiss
+            </button>
+          </div>
+          <button
+            onClick={() => setShowKeyInput(true)}
+            className="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-1 hover:bg-indigo-100 font-medium flex-shrink-0"
+          >
+            🔑 Fix key
+          </button>
+        </div>
       )}
     </div>
   )
