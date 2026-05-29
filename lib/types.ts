@@ -15,11 +15,12 @@ export interface Book {
   id: string
   title: string
   authors: string
-  year: number
-  editions: number
-  holdings: number
-  coverUrl?: string
-  openLibraryLink: string
+  year: string
+  rating?: number
+  reviews?: number
+  thumbnail?: string
+  link: string
+  description?: string
 }
 
 export interface ScholarBook {

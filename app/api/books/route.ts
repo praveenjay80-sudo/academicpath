@@ -1,114 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Book } from '@/lib/types'
 
-// Strip academic-paper prefixes before sending to book APIs
-const STRIP_PREFIXES = [
-  /^papers? on\s+/i,
-  /^research on\s+/i,
-  /^studies (on|about)\s+/i,
-  /^articles? on\s+/i,
-  /^literature on\s+/i,
-  /^work on\s+/i,
-  /^review of\s+/i,
-]
-
-function cleanQueryForBooks(query: string): string {
-  let cleaned = query
-  for (const pattern of STRIP_PREFIXES) {
-    cleaned = cleaned.replace(pattern, '')
-  }
-  return cleaned.trim()
-}
-
-async function getWorldCatHoldings(isbn: string): Promise<number> {
-  try {
-    const res = await fetch(
-      `https://classify.oclc.org/classify2/Classify?isbn=${encodeURIComponent(isbn)}&summary=true`,
-      {
-        signal: AbortSignal.timeout(5000),
-        headers: {
-          'User-Agent': 'AcademicPath/1.0 (https://github.com/academicpath; praveen.jay80@gmail.com)',
-        },
-      }
-    )
-    if (!res.ok) return 0
-    const xml = await res.text()
-    const match = xml.match(/holdings="(\d+)"/)
-    return match ? parseInt(match[1]) : 0
-  } catch {
-    return 0
-  }
-}
-
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get('q')
-  if (!query) {
-    return NextResponse.json({ error: 'Query is required' }, { status: 400 })
-  }
+  if (!query) return NextResponse.json({ error: 'Query required' }, { status: 400 })
 
-  const cleanedQuery = cleanQueryForBooks(query)
+  const apiKey = request.headers.get('x-serpapi-key') || process.env.SERPAPI_KEY
+  if (!apiKey) return NextResponse.json({ error: 'SerpAPI key required' }, { status: 401 })
 
   try {
-    const olRes = await fetch(
-      `https://openlibrary.org/search.json?q=${encodeURIComponent(cleanedQuery)}&limit=15&fields=key,title,author_name,first_publish_year,edition_count,isbn,cover_i&type=work`,
-      {
-        signal: AbortSignal.timeout(10000),
-        headers: {
-          'User-Agent': 'AcademicPath/1.0 (https://github.com/academicpath; praveen.jay80@gmail.com)',
-        },
+    const url = `https://serpapi.com/search.json?engine=google_books&q=${encodeURIComponent(query)}&api_key=${apiKey}`
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      if (res.status === 401 || body.includes('Invalid API key')) {
+        return NextResponse.json({ error: 'Invalid SerpAPI key' }, { status: 401 })
       }
-    )
-
-    if (!olRes.ok) {
-      return NextResponse.json(
-        { error: `Open Library error: ${olRes.status}` },
-        { status: 502 }
-      )
+      return NextResponse.json({ error: `Google Books error: ${res.status}` }, { status: 502 })
     }
 
-    const olData = await olRes.json()
-    const docs = (olData.docs || []) as Array<Record<string, unknown>>
+    const data = await res.json()
+    const raw = (data.books_results || []) as Array<Record<string, unknown>>
 
-    if (docs.length === 0) {
-      return NextResponse.json({ books: [] })
-    }
+    const books: Book[] = raw.slice(0, 15).map((item, i) => {
+      const authors = Array.isArray(item.authors)
+        ? (item.authors as string[]).join(', ')
+        : (item.authors as string | undefined) ?? 'Unknown'
 
-    // Enrich all books with WorldCat holdings in parallel
-    const enrichedResults = await Promise.allSettled(
-      docs.map(async (doc) => {
-        const isbn = (doc.isbn as string[] | undefined)?.[0]
-        const holdings = isbn ? await getWorldCatHoldings(isbn) : 0
-        const authorNames = doc.author_name as string[] | undefined
-        const coverId = doc.cover_i as number | undefined
+      // publish_info is usually "YYYY - Publisher"
+      const publishInfo = (item.publish_info as string | undefined) ?? ''
+      const yearMatch = publishInfo.match(/\b(1[89]\d{2}|20\d{2})\b/)
+      const year = yearMatch ? yearMatch[1] : ''
 
-        const book: Book = {
-          id: (doc.key as string) || Math.random().toString(36).slice(2),
-          title: (doc.title as string) || 'Unknown Title',
-          authors: authorNames ? authorNames.slice(0, 3).join(', ') : 'Unknown',
-          year: (doc.first_publish_year as number) || 0,
-          editions: (doc.edition_count as number) || 0,
-          holdings,
-          coverUrl: coverId
-            ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg`
-            : undefined,
-          openLibraryLink: `https://openlibrary.org${doc.key}`,
-        }
-        return book
-      })
-    )
-
-    const books = enrichedResults
-      .filter((r): r is PromiseFulfilledResult<Book> => r.status === 'fulfilled')
-      .map((r) => r.value)
-      .sort((a, b) => b.holdings - a.holdings || b.editions - a.editions)
-      .slice(0, 10)
+      return {
+        id: String(i),
+        title: (item.title as string) || 'Unknown Title',
+        authors,
+        year,
+        rating: item.rating as number | undefined,
+        reviews: item.reviews as number | undefined,
+        thumbnail: item.thumbnail as string | undefined,
+        link: (item.link as string) || `https://books.google.com/books?q=${encodeURIComponent(query)}`,
+        description: item.description as string | undefined,
+      }
+    })
 
     return NextResponse.json({ books })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json(
-      { error: `Failed to fetch books: ${message}` },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: `Failed to fetch books: ${message}` }, { status: 500 })
   }
 }
