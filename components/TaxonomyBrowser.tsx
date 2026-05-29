@@ -21,6 +21,7 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
   const [open, setOpen] = useState(false)
   const [columns, setColumns] = useState<Column[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [generating, setGenerating] = useState(false)
   const [anthropicKey, setAnthropicKey] = useState('')
   const [keyInput, setKeyInput] = useState('')
   const [showKeyInput, setShowKeyInput] = useState(false)
@@ -35,7 +36,6 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
     keyRef.current = stored
   }, [])
 
-  // L0 always loads from OpenAlex — no key required
   useEffect(() => {
     if (open && columns.length === 0) loadL0()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -69,44 +69,54 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
     setError(null)
   }
 
-  async function handleSelect(colIdx: number, nodeId: string, colNodes: TaxonomyNode[]) {
+  // Selecting a dropdown just records the choice — does NOT auto-fetch
+  function handleSelect(colIdx: number, nodeId: string, colNodes: TaxonomyNode[]) {
     const node = colNodes.find(n => n.id === nodeId)
     if (!node) return
-
     onSearch(node.display_name)
     setError(null)
     setNeedKey(false)
-
-    const nextLevel = colIdx + 1
-
-    const updatedCols: Column[] = columns
+    const newCols = columns
       .slice(0, colIdx + 1)
       .map((col, i) => (i === colIdx ? { ...col, selectedId: nodeId } : col))
+    setColumns(newCols)
+  }
 
-    if (nextLevel > MAX_DEPTH) {
-      setColumns(updatedCols)
-      return
-    }
+  // Explicit button: generate the next level for the currently selected node
+  async function handleGenerate(targetColIdx: number) {
+    if (generating) return
+    const col = columns[targetColIdx]
+    if (!col?.selectedId) return
+    const node = col.nodes.find(n => n.id === col.selectedId)
+    if (!node) return
 
-    // All levels L1+ use Claude — require key
+    const nextLevel = targetColIdx + 1
+    if (nextLevel > MAX_DEPTH) return
+
     if (!keyRef.current) {
-      setColumns(updatedCols)
       setNeedKey(true)
       return
     }
 
-    const breadcrumb = updatedCols
-      .slice(0, colIdx)
-      .map(col => col.nodes.find(n => n.id === col.selectedId)?.display_name)
+    setError(null)
+    setNeedKey(false)
+    setGenerating(true)
+
+    const breadcrumb = columns
+      .slice(0, targetColIdx)
+      .map(c => c.nodes.find(n => n.id === c.selectedId)?.display_name)
       .filter(Boolean)
       .join(' › ')
 
-    setColumns([...updatedCols, { nodes: [], loading: true, selectedId: '', level: nextLevel }])
+    const base = columns
+      .slice(0, targetColIdx + 1)
+      .map((c, i) => (i === targetColIdx ? { ...c } : c))
+
+    setColumns([...base, { nodes: [], loading: true, selectedId: '', level: nextLevel }])
 
     let children: TaxonomyNode[] = []
-
-    // Primary: Claude
     const key = keyRef.current
+
     try {
       const r = await fetch(
         `/api/taxonomy/claude?` + new URLSearchParams({
@@ -121,32 +131,36 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
       children = d.nodes || []
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Claude request failed'
-      // Fallback: OpenAlex (works for L1, sometimes L2)
+      // Fallback: try OpenAlex
       try {
         const r2 = await fetch(`/api/taxonomy?parent=${node.id}&level=${nextLevel}`)
         const d2 = await r2.json()
         if (!d2.error && (d2.nodes || []).length > 0) {
           children = d2.nodes
         } else {
-          setColumns(updatedCols)
-          setError(msg.includes('401') || msg.includes('key') ? msg : `Failed to load: ${msg}`)
+          setColumns(base)
+          setError(msg)
+          setGenerating(false)
           return
         }
       } catch {
-        setColumns(updatedCols)
+        setColumns(base)
         setError(msg)
+        setGenerating(false)
         return
       }
     }
 
+    setGenerating(false)
+
     if (children.length === 0) {
-      setColumns(updatedCols)
-      setError('No results found — try a different selection.')
+      setColumns(base)
+      setError('Claude returned no results — try again.')
       return
     }
 
     setColumns([
-      ...updatedCols,
+      ...base,
       { nodes: children, loading: false, selectedId: '', level: nextLevel },
     ])
   }
@@ -188,17 +202,18 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
         </button>
       </div>
 
-      {/* Key input panel */}
+      {/* Key input */}
       {showKeyInput && (
         <div className="mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-xl">
           <p className="text-xs text-indigo-700 font-medium mb-1">
-            Anthropic API key — needed to browse Domains, Subfields and Topics
+            Anthropic API key — generates Domains, Subfields &amp; Topics with Claude
           </p>
           <p className="text-xs text-indigo-500 mb-2">
             Get one at{' '}
-            <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer"
-              className="underline">console.anthropic.com</a>
-            {' '}→ API Keys → Create Key (starts with sk-ant-…)
+            <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer" className="underline">
+              console.anthropic.com
+            </a>{' '}
+            → API Keys → Create Key (starts with sk-ant-…)
           </p>
           <div className="flex gap-2">
             <input
@@ -228,21 +243,21 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
         </p>
       )}
 
-      {/* Dropdowns */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Columns + generate buttons */}
+      <div className="space-y-3">
         {columns.map((col, idx) => (
-          <div key={`col-${idx}`} className="flex items-center gap-2">
-            {idx > 0 && <span className="text-gray-300 select-none">›</span>}
+          <div key={`col-${idx}`} className="flex flex-wrap items-center gap-2">
+            {/* Dropdown or loading skeleton */}
             {col.loading ? (
               <div className="flex items-center gap-1.5">
-                <div className="h-8 w-40 bg-gray-100 rounded-lg animate-pulse" />
-                <span className="text-[10px] text-indigo-400 animate-pulse">Claude…</span>
+                <div className="h-8 w-44 bg-gray-100 rounded-lg animate-pulse" />
+                <span className="text-[10px] text-indigo-400 animate-pulse">Claude generating…</span>
               </div>
-            ) : col.nodes.length === 0 ? null : (
+            ) : col.nodes.length > 0 ? (
               <select
                 value={col.selectedId}
                 onChange={e => e.target.value && handleSelect(idx, e.target.value, col.nodes)}
-                className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all cursor-pointer max-w-[240px]"
+                className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all cursor-pointer max-w-[260px]"
               >
                 <option value="">{LEVEL_LABELS[col.level] ?? `Level ${col.level}`}…</option>
                 {col.nodes.map(n => (
@@ -251,6 +266,39 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
                   </option>
                 ))}
               </select>
+            ) : null}
+
+            {/* Generate button: show after this column has a selection and next level is in range */}
+            {!col.loading && col.selectedId && idx + 1 <= MAX_DEPTH && idx === columns.length - 1 && (
+              <button
+                onClick={() => handleGenerate(idx)}
+                disabled={generating}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
+              >
+                {generating ? (
+                  <>
+                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    Generating…
+                  </>
+                ) : (
+                  <>✨ Generate {LEVEL_LABELS[idx + 1] ?? `L${idx + 1}`}s</>
+                )}
+              </button>
+            )}
+
+            {/* Regenerate button: show if next level already exists */}
+            {!col.loading && col.selectedId && idx + 1 <= MAX_DEPTH && idx < columns.length - 1 && !columns[idx + 1]?.loading && (
+              <button
+                onClick={() => handleGenerate(idx)}
+                disabled={generating}
+                className="text-[10px] text-gray-400 hover:text-indigo-500 transition-colors disabled:opacity-40"
+                title={`Regenerate ${LEVEL_LABELS[idx + 1] ?? `L${idx + 1}`}s`}
+              >
+                ↺
+              </button>
             )}
           </div>
         ))}
@@ -261,11 +309,11 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
         <div className="mt-3 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
           <span className="text-amber-500">🔑</span>
           <p className="text-xs text-amber-700 flex-1">
-            An <strong>Anthropic API key</strong> is needed to generate domains and subfields.
+            Add an <strong>Anthropic API key</strong> to generate subfields with Claude.
           </p>
           <button
             onClick={() => setShowKeyInput(true)}
-            className="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-1 hover:bg-indigo-100 font-medium flex-shrink-0"
+            className="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-1 hover:bg-indigo-100 font-medium"
           >
             Add key
           </button>
@@ -279,7 +327,7 @@ export default function TaxonomyBrowser({ onSearch }: Props) {
           <p className="text-xs text-red-700 font-medium flex-1">{error}</p>
           <button
             onClick={() => { setError(null); setShowKeyInput(true) }}
-            className="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-1 hover:bg-indigo-100 font-medium flex-shrink-0"
+            className="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-1 hover:bg-indigo-100 font-medium"
           >
             🔑 Fix key
           </button>
