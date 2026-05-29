@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { Roadmap } from '@/lib/types'
 
-export const maxDuration = 45
+export const maxDuration = 60
 
 const MODEL_FALLBACKS = [
   'claude-haiku-4-5-20251001',
@@ -42,36 +42,29 @@ Return ONLY valid JSON — no markdown fences, no explanation:
           "kind": "book",
           "type": "pedagogical",
           "note": "One sentence on why this specific work matters at this stage"
-        },
-        {
-          "title": "Exact paper title",
-          "author": "Author name(s)",
-          "year": "YYYY",
-          "kind": "paper",
-          "type": "seminal",
-          "note": "One sentence on why this specific work matters at this stage"
         }
       ]
     },
-    { "level": "Intermediate", ... },
-    { "level": "Advanced", ... },
-    { "level": "Research", ... }
+    { "level": "Intermediate", "works": [...] },
+    { "level": "Advanced", "works": [...] },
+    { "level": "Research", "works": [...] }
   ],
   "branches": ["specialization1", "specialization2", "specialization3", "specialization4", "specialization5"]
 }
 
 Rules:
 - Exactly 4 stages in order: Beginner, Intermediate, Advanced, Research
-- Exactly 4 concepts per stage — specific learnable skills or ideas, not vague categories
-- Exactly 3 works per stage — real, verifiable titles only (no fabrications)
+- 4-6 concepts per stage — specific learnable skills or ideas, not vague categories
+- Works per stage: include ALL core, canonical books and papers a serious student must read — no arbitrary cap. Typically 5-10 per stage. Only omit a work if it is genuinely redundant with another listed work.
+- Real, verifiable titles only (no fabrications). If unsure of a title, omit it.
 - Each work must have kind: "paper" or "book", and type: one of:
     "breakthrough" = paradigm-shifting, changed the field permanently
     "seminal"      = foundational, widely cited, shaped the direction of research
     "pedagogical"  = best for learning, clear exposition, ideal for students
-- Include at least 1 paper and 1 book per stage where possible
+- Include a healthy mix of papers and books across each stage
 - The note must say WHY this work is essential at THIS stage, not just what it is
 - Exactly 4 branches at the end
-- Be concise in descriptions and notes — every word counts`
+- Be concise in notes — every word counts`
 
   let lastError = ''
 
@@ -79,7 +72,7 @@ Rules:
     try {
       const message = await client.messages.create({
         model,
-        max_tokens: 4096,
+        max_tokens: 8192,
         messages: [{ role: 'user', content: prompt }],
       })
 
