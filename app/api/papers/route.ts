@@ -13,142 +13,123 @@ const SURVEY_WORDS = [
   'tutorial', 'handbook', 'guide', 'fundamentals', 'principles',
 ]
 
-// CrossRef types to exclude (books, chapters, datasets, reports)
-const EXCLUDED_TYPES = new Set([
-  'book', 'edited-book', 'book-chapter', 'book-section',
-  'book-series', 'reference-book', 'reference-entry',
-  'monograph', 'report', 'dataset', 'component',
-])
-
-type CrossRefAuthor = {
-  given?: string
-  family?: string
-  name?: string
+interface TavilyResult {
+  title: string
+  url: string
+  content: string
+  score: number
+  published_date?: string
 }
 
-type CrossRefItem = {
-  DOI?: string
-  title?: string[]
-  author?: CrossRefAuthor[]
-  published?: { 'date-parts'?: number[][] }
-  'is-referenced-by-count'?: number
-  URL?: string
-  type?: string
+function parseCitations(content: string): number {
+  const match = content.match(/Cited by ([\d,]+)/i)
+  return match ? parseInt(match[1].replace(/,/g, ''), 10) : 0
+}
+
+function parseYear(content: string, published_date?: string): number {
+  if (published_date) {
+    const y = new Date(published_date).getFullYear()
+    if (y > 1900 && y <= new Date().getFullYear() + 1) return y
+  }
+  const match = content.match(/\b(19[5-9]\d|20[0-2]\d)\b/)
+  return match ? parseInt(match[0]) : 0
+}
+
+function parseAuthors(content: string): string {
+  const firstLine = content.split('\n')[0] || ''
+  const parts = firstLine.split(' - ')
+  const candidate = parts[0]?.trim() ?? ''
+  // Reasonable author string: not too long, no URL characters
+  if (candidate.length > 0 && candidate.length < 120 && !candidate.includes('http')) {
+    return candidate
+  }
+  return 'Unknown'
 }
 
 function getTag(title: string, year: number, citations: number): PaperTag {
   const lower = title.toLowerCase()
-  if (SURVEY_WORDS.some((w) => lower.includes(w))) return 'SURVEY'
+  if (SURVEY_WORDS.some(w => lower.includes(w))) return 'SURVEY'
   if (year >= 2022) return 'RECENT'
   if (citations >= 500) return 'FOUNDATIONAL'
   return 'INFLUENTIAL'
-}
-
-function formatAuthors(authors: CrossRefAuthor[] | undefined): string {
-  if (!authors || authors.length === 0) return 'Unknown'
-  const names = authors.slice(0, 3).map((a) =>
-    a.family
-      ? a.given ? `${a.given} ${a.family}` : a.family
-      : a.name || 'Unknown'
-  )
-  return names.join(', ') + (authors.length > 3 ? ' et al.' : '')
-}
-
-function extractYear(published: CrossRefItem['published']): number {
-  return published?.['date-parts']?.[0]?.[0] ?? 0
 }
 
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get('q')
   if (!query) return NextResponse.json({ error: 'Query is required' }, { status: 400 })
 
-  const apiKey = request.headers.get('x-serpapi-key') || process.env.SERPAPI_KEY
+  const tavilyKey = request.headers.get('x-tavily-key') || process.env.TAVILY_API_KEY
+  const serpApiKey = request.headers.get('x-serpapi-key') || process.env.SERPAPI_KEY
 
-  // ── CrossRef (papers sorted by citation count server-side) ───────────────
-  // query.title = title-field search only → field-specific results (no economics
-  // papers appearing for "quantum mechanics" just because "mechanics" is in them)
-  const crUrl = new URL('https://api.crossref.org/works')
-  crUrl.searchParams.set('query.title', query)
-  crUrl.searchParams.set('sort', 'is-referenced-by-count')
-  crUrl.searchParams.set('order', 'desc')
-  crUrl.searchParams.set('rows', '30')
-  crUrl.searchParams.set('select', 'DOI,title,author,published,is-referenced-by-count,URL,type')
-  crUrl.searchParams.set('mailto', 'praveen.jay80@gmail.com')
-
-  // ── SerpAPI (only for related keyword chips) ─────────────────────────────
-  const serpUrl = new URL('https://serpapi.com/search')
-  if (apiKey) {
-    serpUrl.searchParams.set('engine', 'google_scholar')
-    serpUrl.searchParams.set('q', query)
-    serpUrl.searchParams.set('num', '5')
-    serpUrl.searchParams.set('api_key', apiKey)
+  if (!tavilyKey) {
+    return NextResponse.json({ error: 'Tavily API key required' }, { status: 401 })
   }
 
-  // Run both in parallel
-  const [crResult, serpResult] = await Promise.allSettled([
-    fetch(crUrl.toString(), {
-      signal: AbortSignal.timeout(12000),
-      headers: { 'User-Agent': 'AcademicPath/1.0 (praveen.jay80@gmail.com)' },
+  // ── Tavily: Google Scholar papers ─────────────────────────────────────────
+  const tavilyPromise = fetch('https://api.tavily.com/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      api_key: tavilyKey,
+      query,
+      search_depth: 'advanced',
+      include_domains: ['scholar.google.com'],
+      max_results: 20,
     }),
-    apiKey
-      ? fetch(serpUrl.toString(), { signal: AbortSignal.timeout(8000) })
-      : Promise.reject('no key'),
-  ])
+    signal: AbortSignal.timeout(15000),
+  })
 
-  // ── Parse CrossRef papers ─────────────────────────────────────────────────
-  if (crResult.status === 'rejected') {
-    console.error('CrossRef fetch rejected:', crResult.reason)
-    return NextResponse.json({ error: 'Papers API unavailable' }, { status: 502 })
+  // ── SerpAPI: related keyword chips (optional) ─────────────────────────────
+  const serpPromise = serpApiKey
+    ? fetch(
+        `https://serpapi.com/search?engine=google_scholar&q=${encodeURIComponent(query)}&num=5&api_key=${serpApiKey}`,
+        { signal: AbortSignal.timeout(8000) }
+      )
+    : Promise.reject('no key')
+
+  const [tavilyResult, serpResult] = await Promise.allSettled([tavilyPromise, serpPromise])
+
+  // ── Parse Tavily papers ───────────────────────────────────────────────────
+  if (tavilyResult.status === 'rejected') {
+    console.error('Tavily fetch failed:', tavilyResult.reason)
+    return NextResponse.json({ error: 'Failed to reach Tavily API' }, { status: 502 })
   }
 
-  const crResponse = crResult.value
-  if (!crResponse.ok) {
-    const errText = await crResponse.text().catch(() => '')
-    console.error('CrossRef HTTP error:', crResponse.status, errText)
-    return NextResponse.json(
-      { error: `Papers API error (${crResponse.status})` },
-      { status: 502 }
-    )
+  const tavilyRes = tavilyResult.value
+  if (!tavilyRes.ok) {
+    const body = await tavilyRes.text().catch(() => '')
+    console.error('Tavily error:', tavilyRes.status, body)
+    if (tavilyRes.status === 401) {
+      return NextResponse.json({ error: 'Invalid Tavily API key' }, { status: 401 })
+    }
+    return NextResponse.json({ error: `Tavily error (${tavilyRes.status})` }, { status: 502 })
   }
 
-  let crData: { message: { items: CrossRefItem[] } }
-  try {
-    crData = await crResponse.json()
-  } catch (e) {
-    console.error('CrossRef JSON parse error:', e)
-    return NextResponse.json({ error: 'Failed to parse papers response' }, { status: 502 })
-  }
+  const tavilyData = await tavilyRes.json().catch(() => ({ results: [] }))
+  const results: TavilyResult[] = tavilyData.results || []
 
-  const allItems: CrossRefItem[] = crData?.message?.items || []
-
-  const papers: Paper[] = allItems
-    // Exclude books, datasets, reports — papers only
-    .filter((item) => !EXCLUDED_TYPES.has(item.type ?? ''))
-    // Must have a title and DOI
-    .filter((item) => !!(item.title?.[0]) && !!(item.DOI))
-    .slice(0, 20)
-    .map((item) => {
-      const title = item.title![0]
-      const year = extractYear(item.published)
-      const citations = item['is-referenced-by-count'] ?? 0
+  const papers: Paper[] = results
+    .filter(r => r.title && r.url)
+    .map(r => {
+      const citations = parseCitations(r.content)
+      const year = parseYear(r.content, r.published_date)
+      const authors = parseAuthors(r.content)
+      const tag = getTag(r.title, year, citations)
       return {
-        id: item.DOI!,
-        title,
-        authors: formatAuthors(item.author),
+        id: r.url,
+        title: r.title,
+        authors,
         year,
         citations,
-        link: item.URL || `https://doi.org/${item.DOI}`,
-        tag: getTag(title, year, citations),
+        link: r.url,
+        tag,
       }
     })
 
-  // Re-sort by tag group, then citations within group
-  papers.sort((a, b) => {
-    const tagDiff = TAG_ORDER[a.tag] - TAG_ORDER[b.tag]
-    return tagDiff !== 0 ? tagDiff : b.citations - a.citations
-  })
+  // Sort by citations descending
+  papers.sort((a, b) => b.citations - a.citations)
 
-  // ── Parse SerpAPI keywords ────────────────────────────────────────────────
+  // ── Parse SerpAPI keywords (optional) ─────────────────────────────────────
   let keywords: string[] = []
   if (serpResult.status === 'fulfilled') {
     try {
@@ -157,7 +138,7 @@ export async function GET(request: NextRequest) {
         .map((s: { query: string }) => s.query)
         .filter(Boolean)
     } catch {
-      // keywords stay empty — not critical
+      // non-critical
     }
   }
 
