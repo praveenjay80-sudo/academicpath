@@ -5,6 +5,7 @@ import { TaxonomyNode } from '@/lib/types'
 export const maxDuration = 30  // seconds — prevents Vercel 10s default from killing Claude
 
 const LEVEL_LABELS: Record<number, string> = {
+  1: 'major domains or branches',
   2: 'subfields',
   3: 'research topics',
   4: 'specializations',
@@ -20,8 +21,8 @@ export async function GET(request: NextRequest) {
   }
 
   const level = parseInt(levelStr, 10)
-  if (isNaN(level) || level < 2) {
-    return NextResponse.json({ error: 'level must be ≥ 2' }, { status: 400 })
+  if (isNaN(level) || level < 1) {
+    return NextResponse.json({ error: 'level must be ≥ 1' }, { status: 400 })
   }
 
   const apiKey = request.headers.get('x-anthropic-key') || process.env.ANTHROPIC_API_KEY
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
   const client = new Anthropic({ apiKey })
   const kind = LEVEL_LABELS[level] ?? 'subtopics'
   const contextNote = context ? `, within the broader field of ${context}` : ''
-  const count = level === 2 ? 12 : 10
+  const count = level <= 2 ? 12 : 10
 
   const prompt =
     `List the ${count} most important and well-established ${kind} of "${parentName}"${contextNote}.\n` +
