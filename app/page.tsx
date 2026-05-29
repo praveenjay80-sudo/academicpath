@@ -227,7 +227,7 @@ export default function Home() {
                 <ColHeader
                   emoji="📄"
                   title="Papers"
-                  subtitle="CrossRef · by citation count"
+                  subtitle="Google Scholar · by citation count"
                   count={papers.length}
                   loading={loadingPapers}
                 />
