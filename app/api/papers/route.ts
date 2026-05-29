@@ -22,8 +22,13 @@ interface TavilyResult {
 }
 
 function parseCitations(content: string): number {
-  const match = content.match(/Cited by ([\d,]+)/i)
-  return match ? parseInt(match[1].replace(/,/g, ''), 10) : 0
+  // Google Scholar: "Cited by 1,234"
+  const gs = content.match(/Cited by ([\d,]+)/i)
+  if (gs) return parseInt(gs[1].replace(/,/g, ''), 10)
+  // Semantic Scholar / others: "1,234 Citations" or "Citations: 1,234"
+  const ss = content.match(/([\d,]+)\s+[Cc]itations?|[Cc]itations?[:\s]+([\d,]+)/)
+  if (ss) return parseInt((ss[1] ?? ss[2]).replace(/,/g, ''), 10)
+  return 0
 }
 
 function parseYear(content: string, published_date?: string): number {
@@ -65,16 +70,25 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Tavily API key required' }, { status: 401 })
   }
 
-  // ── Tavily: Google Scholar papers ─────────────────────────────────────────
+  // ── Tavily: academic papers across multiple sources ──────────────────────
   const tavilyPromise = fetch('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       api_key: tavilyKey,
-      query,
+      query: `${query} research paper`,
       search_depth: 'advanced',
-      include_domains: ['scholar.google.com'],
-      max_results: 20,
+      include_domains: [
+        'arxiv.org',
+        'semanticscholar.org',
+        'scholar.google.com',
+        'pubmed.ncbi.nlm.nih.gov',
+        'dl.acm.org',
+        'ieeexplore.ieee.org',
+        'nature.com',
+        'sciencedirect.com',
+      ],
+      max_results: 25,
     }),
     signal: AbortSignal.timeout(15000),
   })
@@ -109,7 +123,14 @@ export async function GET(request: NextRequest) {
   const results: TavilyResult[] = tavilyData.results || []
 
   const papers: Paper[] = results
-    .filter(r => r.title && r.url)
+    .filter(r => {
+      if (!r.title || !r.url) return false
+      // Drop Google Scholar author profiles — they are not papers
+      if (/scholar\.google\.com\/citations\?.*user=/i.test(r.url)) return false
+      // Drop Scholar search-result list pages
+      if (/scholar\.google\.com\/scholar\?/.test(r.url) && !r.url.includes('cluster')) return false
+      return true
+    })
     .map(r => {
       const citations = parseCitations(r.content)
       const year = parseYear(r.content, r.published_date)
