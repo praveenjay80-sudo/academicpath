@@ -2,11 +2,22 @@
 
 import { Roadmap, RoadmapWork } from '@/lib/types'
 
-const STAGE_STYLES = {
-  Beginner:     { border: 'border-emerald-400', badge: 'bg-emerald-100 text-emerald-700', icon: '🌱' },
-  Intermediate: { border: 'border-blue-400',    badge: 'bg-blue-100 text-blue-700',       icon: '📖' },
-  Advanced:     { border: 'border-violet-400',  badge: 'bg-violet-100 text-violet-700',   icon: '🔬' },
-  Research:     { border: 'border-amber-400',   badge: 'bg-amber-100 text-amber-700',     icon: '🚀' },
+const STAGE_BADGE: Record<string, string> = {
+  Beginner:     'bg-emerald-100 text-emerald-700',
+  Intermediate: 'bg-blue-100 text-blue-700',
+  Advanced:     'bg-violet-100 text-violet-700',
+  Research:     'bg-amber-100 text-amber-700',
+}
+
+const STAGE_DOT: Record<string, string> = {
+  Beginner:     'bg-emerald-400',
+  Intermediate: 'bg-blue-400',
+  Advanced:     'bg-violet-400',
+  Research:     'bg-amber-400',
+}
+
+const STAGE_ICON: Record<string, string> = {
+  Beginner: '🌱', Intermediate: '📖', Advanced: '🔬', Research: '🚀',
 }
 
 const TYPE_BADGE: Record<string, string> = {
@@ -23,72 +34,89 @@ const TYPE_LABEL: Record<string, string> = {
 
 const KIND_ICON: Record<string, string> = { paper: '📄', book: '📚' }
 
-function WorkItem({ work }: { work: RoadmapWork }) {
-  return (
-    <div className="flex gap-2">
-      <span className="flex-shrink-0 text-sm mt-0.5">{KIND_ICON[work.kind] ?? '📄'}</span>
-      <div>
-        <span className="text-[12px] font-semibold text-gray-900">{work.title} </span>
-        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${TYPE_BADGE[work.type] ?? TYPE_BADGE.seminal}`}>
-          {TYPE_LABEL[work.type] ?? work.type}
-        </span>
-        <p className="text-[10px] text-gray-400 mt-0.5">
-          {work.author}{work.year ? ` · ${work.year}` : ''}
-        </p>
-        <p className="text-[11px] text-gray-500 italic leading-relaxed">{work.note}</p>
-      </div>
-    </div>
-  )
+interface FlatWork extends RoadmapWork {
+  stage: string
+  duration: string
 }
 
 export default function RoadmapPanel({ roadmap }: { roadmap: Roadmap }) {
+  // Flatten all works in stage order into a single list
+  const allWorks: FlatWork[] = roadmap.stages.flatMap(stage =>
+    (stage.works ?? []).map(w => ({ ...w, stage: stage.level, duration: stage.duration }))
+  )
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
+      {/* Overview */}
       <p className="text-xs text-gray-600 leading-relaxed">{roadmap.overview}</p>
 
+      {/* Prerequisites */}
       {roadmap.prerequisites?.length > 0 && (
-        <div>
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Prerequisites</p>
-          <div className="flex flex-wrap gap-1">
-            {roadmap.prerequisites.map(p => (
-              <span key={p} className="text-[10px] bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{p}</span>
-            ))}
-          </div>
+        <div className="flex flex-wrap gap-1">
+          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider self-center mr-1">Needs:</span>
+          {roadmap.prerequisites.map(p => (
+            <span key={p} className="text-[10px] bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{p}</span>
+          ))}
         </div>
       )}
 
-      <div className="space-y-6">
-        {roadmap.stages.map((stage, i) => {
-          const s = STAGE_STYLES[stage.level] ?? STAGE_STYLES.Beginner
+      {/* Flowing works — single vertical timeline */}
+      <div className="relative border-l-2 border-gray-200 pl-5 space-y-0">
+        {allWorks.map((work, i) => {
+          const prevStage = i > 0 ? allWorks[i - 1].stage : null
+          const isNewStage = work.stage !== prevStage
+          const dot = STAGE_DOT[work.stage] ?? 'bg-gray-300'
+
           return (
-            <div key={i} className={`border-l-4 ${s.border} pl-3`}>
-              <div className="flex items-center gap-2 mb-1">
-                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${s.badge}`}>
-                  {s.icon} {stage.level}
-                </span>
-                <span className="text-[10px] text-gray-400">{stage.duration}</span>
-              </div>
-
-              <p className="text-sm font-bold text-gray-800 mb-1">{stage.title}</p>
-              <p className="text-[11px] text-gray-500 leading-relaxed mb-2">{stage.description}</p>
-
-              <div className="flex flex-wrap gap-1 mb-3">
-                {stage.concepts.map(c => (
-                  <span key={c} className="text-[10px] bg-white border border-gray-200 text-gray-600 rounded px-1.5 py-0.5">{c}</span>
-                ))}
-              </div>
-
-              {stage.works?.length > 0 && (
-                <div className="space-y-3">
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Essential Reading</p>
-                  {stage.works.map((w, j) => <WorkItem key={j} work={w} />)}
+            <div key={i}>
+              {/* Stage transition label */}
+              {isNewStage && (
+                <div className="relative -ml-7 mb-3 mt-5 first:mt-0 flex items-center gap-2">
+                  <span className={`w-3 h-3 rounded-full flex-shrink-0 ${dot}`} />
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${STAGE_BADGE[work.stage]}`}>
+                    {STAGE_ICON[work.stage]} {work.stage} · {work.duration}
+                  </span>
                 </div>
               )}
+
+              {/* Work node */}
+              <div className="relative mb-4">
+                {/* Connector dot */}
+                <span className={`absolute -left-7 top-1.5 w-2 h-2 rounded-full border-2 border-white ${dot}`} />
+
+                <div className="flex gap-2 items-start">
+                  <span className="text-sm flex-shrink-0 mt-0.5">{KIND_ICON[work.kind] ?? '📄'}</span>
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-semibold text-gray-900 leading-snug">{work.title}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {work.author}{work.year ? ` · ${work.year}` : ''}
+                    </p>
+                    {/* Both tags inline */}
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${STAGE_BADGE[work.stage]}`}>
+                        {STAGE_ICON[work.stage]} {work.stage}
+                      </span>
+                      <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${TYPE_BADGE[work.type] ?? TYPE_BADGE.seminal}`}>
+                        {TYPE_LABEL[work.type] ?? work.type}
+                      </span>
+                      <span className="text-[9px] text-gray-400 self-center">{work.kind}</span>
+                    </div>
+                    <p className="text-[11px] text-gray-500 italic leading-relaxed mt-1">{work.note}</p>
+                  </div>
+                </div>
+              </div>
             </div>
           )
         })}
+
+        {/* End cap */}
+        <div className="relative -ml-7 flex items-center gap-2 pb-1">
+          <span className="w-3 h-3 rounded-full bg-gray-300 flex-shrink-0" />
+          <span className="text-[10px] text-gray-400 italic">You're at the frontier</span>
+        </div>
       </div>
 
+      {/* Specializations */}
       {roadmap.branches?.length > 0 && (
         <div>
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Where This Leads</p>
