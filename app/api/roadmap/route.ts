@@ -62,15 +62,16 @@ Return ONLY valid JSON — no markdown fences, no explanation:
 
 Rules:
 - Exactly 4 stages in order: Beginner, Intermediate, Advanced, Research
-- 5 concepts per stage — specific learnable skills or ideas, not vague categories
-- 4-6 works per stage — real, verifiable titles only (no fabrications)
+- Exactly 4 concepts per stage — specific learnable skills or ideas, not vague categories
+- Exactly 3 works per stage — real, verifiable titles only (no fabrications)
 - Each work must have kind: "paper" or "book", and type: one of:
     "breakthrough" = paradigm-shifting, changed the field permanently
     "seminal"      = foundational, widely cited, shaped the direction of research
     "pedagogical"  = best for learning, clear exposition, ideal for students
 - Include at least 1 paper and 1 book per stage where possible
 - The note must say WHY this work is essential at THIS stage, not just what it is
-- 4-6 branches at the end`
+- Exactly 4 branches at the end
+- Be concise in descriptions and notes — every word counts`
 
   let lastError = ''
 
@@ -78,12 +79,29 @@ Rules:
     try {
       const message = await client.messages.create({
         model,
-        max_tokens: 3000,
+        max_tokens: 4096,
         messages: [{ role: 'user', content: prompt }],
       })
 
       const raw = (message.content[0] as { type: string; text: string }).text.trim()
-      const json = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+      let json = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+
+      // If truncated, close any unclosed brackets so JSON.parse can recover partial data
+      if (!json.endsWith('}')) {
+        const opens: string[] = []
+        let inStr = false, esc = false
+        for (const ch of json) {
+          if (esc) { esc = false; continue }
+          if (ch === '\\' && inStr) { esc = true; continue }
+          if (ch === '"') { inStr = !inStr; continue }
+          if (!inStr) {
+            if (ch === '{' || ch === '[') opens.push(ch === '{' ? '}' : ']')
+            if (ch === '}' || ch === ']') opens.pop()
+          }
+        }
+        json += opens.reverse().join('')
+      }
+
       const parsed: Roadmap = JSON.parse(json)
 
       if (!parsed.stages || parsed.stages.length === 0) {
